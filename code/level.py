@@ -1,4 +1,4 @@
-import pygame, sys
+from debug import *
 from settings import *
 from tile import Tile
 from player import Player
@@ -53,6 +53,7 @@ class Level:
 		#assign sprites to draw surface
 		self.visible_sprites.custom_draw(self.player)
 		self.visible_sprites.update()
+		debug(self.player.status)
 
 class YSortCameraGroup(pygame.sprite.Group):
 	def __init__(self):
