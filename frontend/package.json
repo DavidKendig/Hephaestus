@@ -1,0 +1,29 @@
+{
+  "name": "hephaestus",
+  "version": "0.1.0",
+  "description": "Self-hosted AI chat for local Ollama models",
+  "private": true,
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env HEPH_DEV=1 electron .\"",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "npm run build && electron ."
+  },
+  "dependencies": {
+    "highlight.js": "^11.10.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1",
+    "rehype-highlight": "^7.0.0",
+    "remark-gfm": "^4.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "vite": "^6.0.5",
+    "wait-on": "^8.0.1"
+  }
+}

@@ -1,0 +1,550 @@
+"""Hephaestus backend: FastAPI bridge between the Electron UI and Ollama."""
+
+import json
+import os
+import sys
+import threading
+import time
+from datetime import date
+
+import httpx
+import uvicorn
+from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+import auth
+import crypto
+import db
+import websearch
+
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+HOST = os.environ.get("HEPH_HOST", "127.0.0.1")
+PORT = int(os.environ.get("HEPH_PORT", "8155"))
+
+SYSTEM_PROMPT = (
+    "You are Hephaestus, a helpful AI assistant running locally on the"
+    " user's machine. Answer clearly and use Markdown formatting where it"
+    " helps (code blocks, lists, tables). Today's date is {today}."
+)
+
+SEARCH_PROMPT = (
+    "Web search results for the user's request are provided below. Use them"
+    " to give an accurate, up-to-date answer, and cite sources inline with"
+    " bracketed numbers like [1] that match the result numbers.\n\n"
+    "=== WEB SEARCH RESULTS ===\n{context}\n=== END OF RESULTS ==="
+)
+
+app = FastAPI(title="Hephaestus")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # local-only app; backend binds to 127.0.0.1
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+db.init_db()
+# History decryption keys live only in process memory, keyed by session
+# token. They exist solely between a login and a logout/shutdown, so all
+# sessions from a previous run are useless — clear them.
+db.clear_all_sessions()
+SESSION_DEKS: dict[str, bytes] = {}
+
+
+class ChatRequest(BaseModel):
+    conversation_id: str | None = None
+    model: str
+    message: str
+    web_search: bool = False
+
+
+class ConversationPatch(BaseModel):
+    title: str | None = None
+    model: str | None = None
+
+
+class SetupRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class AddUserRequest(BaseModel):
+    username: str
+
+
+class AvatarRequest(BaseModel):
+    avatar: str
+
+
+def _sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _public_user(u: dict) -> dict:
+    return {
+        "id": u["id"],
+        "username": u["username"],
+        "is_admin": bool(u["is_admin"]),
+        "must_change_password": bool(u["must_change_password"]),
+        "avatar": u.get("avatar"),
+        "created_at": u["created_at"],
+    }
+
+
+def _validate_username(username: str) -> str:
+    username = username.strip()
+    if not (2 <= len(username) <= 32) or not all(
+        c.isalnum() or c in "._- " for c in username
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Username must be 2-32 characters"
+                   " (letters, numbers, . _ - and spaces).",
+        )
+    return username
+
+
+def _validate_password(password: str) -> str:
+    if len(password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 8 characters.",
+        )
+    return password
+
+
+def _token_from_header(authorization: str | None) -> str | None:
+    if authorization and authorization.startswith("Bearer "):
+        return authorization[7:]
+    return None
+
+
+async def current_user(
+    authorization: str | None = Header(default=None),
+) -> dict | None:
+    token = _token_from_header(authorization)
+    if not token:
+        return None
+    user = db.get_session_user(token)
+    if not user:
+        return None
+    dek = SESSION_DEKS.get(token)
+    if dek is None:
+        # A session without its in-memory key can't read or safely write
+        # encrypted history — treat it as signed out.
+        db.delete_session(token)
+        return None
+    user["_token"] = token
+    user["_dek"] = dek
+    return user
+
+
+async def require_user(user: dict | None = Depends(current_user)) -> dict:
+    if not user:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return user
+
+
+async def require_admin(user: dict = Depends(require_user)) -> dict:
+    if not user["is_admin"]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok"}
+
+
+# ---------- Auth ----------
+
+@app.get("/api/auth/status")
+async def auth_status(user: dict | None = Depends(current_user)):
+    return {
+        "setup_required": db.count_users() == 0,
+        "user": _public_user(user) if user else None,
+    }
+
+
+def _create_user_keys(user_id: str, password: str) -> bytes:
+    """Generate a fresh data key for a user, wrapped by their password."""
+    enc_salt = crypto.new_salt()
+    dek = crypto.new_dek()
+    kek = crypto.derive_kek(password, enc_salt)
+    db.set_user_keys(user_id, enc_salt, crypto.wrap_dek(kek, dek))
+    return dek
+
+
+def _unlock_dek(user: dict, password: str) -> bytes:
+    """Unwrap the user's data key at login; create keys on first
+    encrypted login (migrating any plaintext history)."""
+    if not user.get("wrapped_dek"):
+        dek = _create_user_keys(user["id"], password)
+        db.encrypt_existing_history(user["id"], dek)
+        return dek
+    kek = crypto.derive_kek(password, user["enc_salt"])
+    dek = crypto.unwrap_dek(kek, user["wrapped_dek"])
+    if dek is None:
+        # Password verified but key won't unwrap — should never happen.
+        raise HTTPException(status_code=500,
+                            detail="Could not unlock chat history key")
+    return dek
+
+
+@app.post("/api/auth/setup")
+async def auth_setup(req: SetupRequest):
+    if db.count_users() > 0:
+        raise HTTPException(status_code=400,
+                            detail="Setup has already been completed")
+    username = _validate_username(req.username)
+    password = _validate_password(req.password)
+    salt, digest = auth.hash_password(password)
+    user = db.create_user(username, salt, digest, is_admin=True)
+    dek = _create_user_keys(user["id"], password)
+    token = auth.generate_session_token()
+    db.create_session(token, user["id"])
+    SESSION_DEKS[token] = dek
+    return {"token": token, "user": _public_user(user)}
+
+
+@app.post("/api/auth/login")
+async def auth_login(req: LoginRequest):
+    user = db.get_user_by_username(req.username.strip())
+    if not user or not auth.verify_password(
+        req.password, user["password_salt"], user["password_hash"]
+    ):
+        raise HTTPException(status_code=401,
+                            detail="Invalid username or password")
+    dek = _unlock_dek(user, req.password)
+    token = auth.generate_session_token()
+    db.create_session(token, user["id"])
+    SESSION_DEKS[token] = dek
+    return {"token": token, "user": _public_user(user)}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(authorization: str | None = Header(default=None),
+                      _: dict = Depends(require_user)):
+    token = _token_from_header(authorization)
+    if token:
+        db.delete_session(token)
+        SESSION_DEKS.pop(token, None)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+async def auth_me(user: dict = Depends(require_user)):
+    return _public_user(user)
+
+
+@app.post("/api/auth/change-password")
+async def change_password(req: ChangePasswordRequest,
+                          user: dict = Depends(require_user)):
+    if not auth.verify_password(
+        req.current_password, user["password_salt"], user["password_hash"]
+    ):
+        raise HTTPException(status_code=401,
+                            detail="Current password is incorrect")
+    password = _validate_password(req.new_password)
+    salt, digest = auth.hash_password(password)
+    db.set_user_password(user["id"], salt, digest,
+                         must_change_password=False)
+    # Rewrap the history key under the new password (data untouched).
+    kek_old = crypto.derive_kek(req.current_password, user["enc_salt"])
+    dek = crypto.unwrap_dek(kek_old, user["wrapped_dek"])
+    if dek is not None:
+        enc_salt = crypto.new_salt()
+        kek_new = crypto.derive_kek(password, enc_salt)
+        db.set_user_keys(user["id"], enc_salt, crypto.wrap_dek(kek_new, dek))
+    return {"ok": True}
+
+
+@app.post("/api/auth/avatar")
+async def set_avatar(req: AvatarRequest, user: dict = Depends(require_user)):
+    # The frontend crops/resizes to a 128px PNG before uploading.
+    if not req.avatar.startswith("data:image/png;base64,"):
+        raise HTTPException(status_code=400,
+                            detail="Avatar must be a PNG data URL")
+    if len(req.avatar) > 300_000:
+        raise HTTPException(status_code=400, detail="Avatar image too large")
+    db.set_user_avatar(user["id"], req.avatar)
+    return {"ok": True, "avatar": req.avatar}
+
+
+@app.delete("/api/auth/avatar")
+async def remove_avatar(user: dict = Depends(require_user)):
+    db.set_user_avatar(user["id"], None)
+    return {"ok": True}
+
+
+# ---------- User management (admin) ----------
+
+@app.get("/api/users")
+async def users_list(_: dict = Depends(require_admin)):
+    return {"users": [_public_user(u) for u in db.list_users()]}
+
+
+@app.post("/api/users")
+async def users_add(req: AddUserRequest, _: dict = Depends(require_admin)):
+    username = _validate_username(req.username)
+    if db.get_user_by_username(username):
+        raise HTTPException(status_code=409,
+                            detail="That username already exists")
+    temp_password = auth.generate_temp_password()
+    salt, digest = auth.hash_password(temp_password)
+    user = db.create_user(username, salt, digest, is_admin=False,
+                          must_change_password=True)
+    _create_user_keys(user["id"], temp_password)
+    return {"user": _public_user(user), "temp_password": temp_password}
+
+
+@app.post("/api/users/{user_id}/reset-password")
+async def users_reset_password(user_id: str,
+                               admin: dict = Depends(require_admin)):
+    target = db.get_user(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target["id"] == admin["id"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Use Change password for your own account",
+        )
+    temp_password = auth.generate_temp_password()
+    salt, digest = auth.hash_password(temp_password)
+    db.set_user_password(target["id"], salt, digest,
+                         must_change_password=True)
+    db.delete_user_sessions(target["id"])  # force them to log back in
+    # Their history key was wrapped by the old password, which the admin
+    # does not know — the encrypted history is unrecoverable by design.
+    # Remove it and issue a fresh key under the temp password.
+    db.delete_user_conversations(target["id"])
+    _create_user_keys(target["id"], temp_password)
+    return {"user": _public_user(db.get_user(user_id)),
+            "temp_password": temp_password}
+
+
+@app.delete("/api/users/{user_id}")
+async def users_delete(user_id: str, admin: dict = Depends(require_admin)):
+    target = db.get_user(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target["id"] == admin["id"]:
+        raise HTTPException(status_code=400,
+                            detail="You cannot delete your own account")
+    db.delete_user(user_id)
+    return {"ok": True}
+
+
+@app.get("/api/models")
+async def models():
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{OLLAMA_URL}/api/tags", timeout=5.0)
+            resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Cannot reach Ollama at {OLLAMA_URL}: {exc}",
+        )
+    data = resp.json()
+    return {
+        "models": [
+            {
+                "name": m["name"],
+                "size": m.get("size"),
+                "parameter_size": m.get("details", {}).get("parameter_size"),
+            }
+            for m in data.get("models", [])
+        ]
+    }
+
+
+def _dek(user: dict | None) -> bytes | None:
+    return user["_dek"] if user else None
+
+
+def _owned_conversation(conv_id: str, user: dict | None) -> dict:
+    conv = db.get_conversation(conv_id, dek=_dek(user))
+    user_id = user["id"] if user else None
+    if not conv or conv.get("user_id") != user_id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conv
+
+
+@app.get("/api/conversations")
+async def conversations(user: dict | None = Depends(current_user)):
+    user_id = user["id"] if user else None
+    return {"conversations": db.list_conversations(user_id, dek=_dek(user))}
+
+
+@app.post("/api/conversations")
+async def create_conversation(user: dict | None = Depends(current_user)):
+    return db.create_conversation(user_id=user["id"] if user else None)
+
+
+@app.get("/api/conversations/{conv_id}")
+async def get_conversation(conv_id: str,
+                           user: dict | None = Depends(current_user)):
+    conv = _owned_conversation(conv_id, user)
+    conv["messages"] = db.list_messages(conv_id, dek=_dek(user))
+    return conv
+
+
+@app.patch("/api/conversations/{conv_id}")
+async def patch_conversation(conv_id: str, patch: ConversationPatch,
+                             user: dict | None = Depends(current_user)):
+    _owned_conversation(conv_id, user)
+    db.update_conversation(conv_id, title=patch.title, model=patch.model,
+                           dek=_dek(user))
+    return db.get_conversation(conv_id, dek=_dek(user))
+
+
+@app.delete("/api/conversations/{conv_id}")
+async def remove_conversation(conv_id: str,
+                              user: dict | None = Depends(current_user)):
+    _owned_conversation(conv_id, user)
+    db.delete_conversation(conv_id)
+    return {"ok": True}
+
+
+@app.post("/api/chat")
+async def chat(req: ChatRequest,
+               user: dict | None = Depends(current_user)):
+    if req.conversation_id:
+        conv = _owned_conversation(req.conversation_id, user)
+    else:
+        conv = db.create_conversation(
+            model=req.model, user_id=user["id"] if user else None
+        )
+
+    conv_id = conv["id"]
+    dek = _dek(user)
+    history = db.list_messages(conv_id, dek=dek)
+
+    # First message titles the conversation.
+    if not history:
+        title = req.message.strip().replace("\n", " ")
+        db.update_conversation(
+            conv_id,
+            title=title[:60] + ("…" if len(title) > 60 else ""),
+            model=req.model,
+            dek=dek,
+        )
+    else:
+        db.update_conversation(conv_id, model=req.model)
+
+    async def stream():
+        yield _sse({"type": "conversation", "conversation_id": conv_id,
+                    "title": db.get_conversation(conv_id, dek=dek)["title"]})
+
+        sources = None
+        search_context = ""
+        if req.web_search:
+            yield _sse({"type": "status", "content": "Searching the web…"})
+            result = await websearch.search_web(req.message)
+            sources = result["sources"] or None
+            search_context = result["context"]
+            if result.get("error"):
+                yield _sse({"type": "status",
+                            "content": f"Search failed: {result['error']}"})
+            elif sources:
+                yield _sse({"type": "sources", "sources": sources})
+
+        db.add_message(conv_id, "user", req.message, dek=dek)
+
+        messages = [{
+            "role": "system",
+            "content": SYSTEM_PROMPT.format(today=date.today().isoformat()),
+        }]
+        messages += [
+            {"role": m["role"], "content": m["content"]} for m in history
+        ]
+        user_content = req.message
+        if search_context:
+            user_content = (
+                SEARCH_PROMPT.format(context=search_context)
+                + f"\n\nUser request: {req.message}"
+            )
+        messages.append({"role": "user", "content": user_content})
+
+        assistant_text = ""
+        try:
+            async with httpx.AsyncClient() as client:
+                async with client.stream(
+                    "POST",
+                    f"{OLLAMA_URL}/api/chat",
+                    json={"model": req.model, "messages": messages,
+                          "stream": True},
+                    timeout=httpx.Timeout(600.0, connect=10.0),
+                ) as resp:
+                    if resp.status_code != 200:
+                        body = (await resp.aread()).decode(errors="replace")
+                        yield _sse({"type": "error",
+                                    "content": f"Ollama error: {body}"})
+                        return
+                    async for line in resp.aiter_lines():
+                        if not line.strip():
+                            continue
+                        chunk = json.loads(line)
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            assistant_text += token
+                            yield _sse({"type": "token", "content": token})
+                        if chunk.get("done"):
+                            break
+        except httpx.HTTPError as exc:
+            yield _sse({"type": "error",
+                        "content": f"Cannot reach Ollama: {exc}"})
+        finally:
+            # Persist whatever was generated, even if the client aborted.
+            if assistant_text:
+                db.add_message(conv_id, "assistant", assistant_text, sources,
+                               dek=dek)
+
+        yield _sse({"type": "done"})
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _watch_parent(pid: int) -> None:
+    """Exit when the process that spawned us (Electron) is gone, so no
+    orphaned backend survives a crash or force-kill of the app."""
+    if sys.platform == "win32":
+        import ctypes
+        SYNCHRONIZE = 0x00100000
+        INFINITE = 0xFFFFFFFF
+        handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+        if not handle:  # parent already gone
+            os._exit(0)
+        ctypes.windll.kernel32.WaitForSingleObject(handle, INFINITE)
+    else:
+        while True:
+            time.sleep(2)
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                break
+    os._exit(0)
+
+
+if __name__ == "__main__":
+    parent_pid = os.environ.get("HEPH_PARENT_PID")
+    if parent_pid and parent_pid.isdigit():
+        threading.Thread(
+            target=_watch_parent, args=(int(parent_pid),), daemon=True
+        ).start()
+    uvicorn.run(app, host=HOST, port=PORT, log_level="info")
