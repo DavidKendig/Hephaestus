@@ -31,7 +31,25 @@ export default function Message({ message, streaming }) {
   if (message.role === 'user') {
     return (
       <div className="msg-row user">
-        <div className="user-bubble">{message.content}</div>
+        <div className="user-msg">
+          {message.images?.length > 0 && (
+            <div className="msg-images">
+              {message.images.map((src, i) => (
+                <img key={i} src={src} alt="attachment" />
+              ))}
+            </div>
+          )}
+          {Array.isArray(message.files) && message.files.length > 0 && (
+            <div className="msg-files">
+              {message.files.map((f, i) => (
+                <span key={i} className="doc-chip">📎 {f.name}</span>
+              ))}
+            </div>
+          )}
+          {message.content && (
+            <div className="user-bubble">{message.content}</div>
+          )}
+        </div>
       </div>
     )
   }
@@ -57,6 +75,21 @@ export default function Message({ message, streaming }) {
               >
                 [{i + 1}] {s.title || new URL(s.url).hostname}
               </a>
+            ))}
+          </div>
+        )}
+        {Array.isArray(message.tool_events) && message.tool_events.length > 0 && (
+          <div className="tool-chips">
+            {message.tool_events.map((t, i) => (
+              <span
+                key={i}
+                className={`tool-chip ${t.ok ? '' : 'failed'}`}
+                title={t.ok ? t.path : t.error}
+              >
+                {t.ok
+                  ? `📄 Created ${t.filename} in ${t.folder}`
+                  : `⚠️ ${t.name} failed`}
+              </span>
             ))}
           </div>
         )}

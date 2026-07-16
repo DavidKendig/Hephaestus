@@ -17,6 +17,8 @@ from pydantic import BaseModel
 import auth
 import crypto
 import db
+import filereader
+import tools
 import websearch
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
@@ -26,8 +28,13 @@ PORT = int(os.environ.get("HEPH_PORT", "8155"))
 SYSTEM_PROMPT = (
     "You are Hephaestus, a helpful AI assistant running locally on the"
     " user's machine. Answer clearly and use Markdown formatting where it"
-    " helps (code blocks, lists, tables). Today's date is {today}."
+    " helps (code blocks, lists, tables). You have tools to create files"
+    " (text, Word, Excel, PDF) in the user's Downloads folder — use them"
+    " when the user asks you to create, save, or export a file, and only"
+    " then. Today's date is {today}."
 )
+
+MAX_TOOL_ROUNDS = 4
 
 SEARCH_PROMPT = (
     "Web search results for the user's request are provided below. Use them"
@@ -51,11 +58,19 @@ db.clear_all_sessions()
 SESSION_DEKS: dict[str, bytes] = {}
 
 
+class FileAttachment(BaseModel):
+    name: str
+    data: str  # data URL or base64
+
+
 class ChatRequest(BaseModel):
     conversation_id: str | None = None
     model: str
     message: str
     web_search: bool = False
+    images: list[str] | None = None
+    files: list[FileAttachment] | None = None
+    think: bool | None = None  # None = model default
 
 
 class ConversationPatch(BaseModel):
@@ -88,6 +103,63 @@ class AvatarRequest(BaseModel):
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
+
+
+MAX_IMAGE_CHARS = 20_000_000  # ~15 MB of image data as base64
+MAX_IMAGES_PER_MESSAGE = 4
+
+
+def _validate_images(images: list[str] | None) -> list[str]:
+    images = images or []
+    if len(images) > MAX_IMAGES_PER_MESSAGE:
+        raise HTTPException(status_code=400, detail="Too many images")
+    for img in images:
+        if not img.startswith("data:image/"):
+            raise HTTPException(status_code=400,
+                                detail="Images must be image data URLs")
+        if len(img) > MAX_IMAGE_CHARS:
+            raise HTTPException(status_code=400,
+                                detail="Image too large (max 15 MB)")
+    return images
+
+
+def _raw_b64(data_url: str) -> str:
+    """Ollama wants bare base64, without the data-URL prefix."""
+    return data_url.split(",", 1)[1] if data_url.startswith("data:") else data_url
+
+
+MAX_FILES_PER_MESSAGE = 4
+MAX_FILE_CHARS = 30_000_000  # ~22 MB of file data as base64
+
+
+def _extract_files(files: list[FileAttachment] | None) -> list[dict]:
+    files = files or []
+    if len(files) > MAX_FILES_PER_MESSAGE:
+        raise HTTPException(status_code=400, detail="Too many files")
+    for f in files:
+        if len(f.data) > MAX_FILE_CHARS:
+            raise HTTPException(status_code=400,
+                                detail=f"File too large: {f.name}")
+    return [filereader.extract(f.name, f.data) for f in files]
+
+
+def _with_file_context(content: str, files: list | None) -> str:
+    """Prefix a message with the extracted content of its attachments."""
+    if not files:
+        return content
+    parts = []
+    for f in files:
+        if f.get("content"):
+            parts.append(
+                f"=== ATTACHED FILE: {f['name']} ===\n"
+                f"{f['content']}\n=== END OF FILE ==="
+            )
+        else:
+            parts.append(
+                f"(The attached file {f['name']} could not be read:"
+                f" {f.get('error') or 'unknown error'})"
+            )
+    return "\n\n".join(parts) + "\n\n" + content
 
 
 def _public_user(u: dict) -> dict:
@@ -345,28 +417,44 @@ async def users_delete(user_id: str, admin: dict = Depends(require_admin)):
     return {"ok": True}
 
 
+_caps_cache: dict[str, list] = {}
+
+
+async def _model_capabilities(client: httpx.AsyncClient, name: str) -> list:
+    if name not in _caps_cache:
+        try:
+            resp = await client.post(f"{OLLAMA_URL}/api/show",
+                                     json={"model": name}, timeout=5.0)
+            resp.raise_for_status()
+            _caps_cache[name] = resp.json().get("capabilities", [])
+        except httpx.HTTPError:
+            return []
+    return _caps_cache[name]
+
+
 @app.get("/api/models")
 async def models():
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{OLLAMA_URL}/api/tags", timeout=5.0)
             resp.raise_for_status()
+            data = resp.json()
+            out = []
+            for m in data.get("models", []):
+                out.append({
+                    "name": m["name"],
+                    "size": m.get("size"),
+                    "parameter_size":
+                        m.get("details", {}).get("parameter_size"),
+                    "capabilities":
+                        await _model_capabilities(client, m["name"]),
+                })
     except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=502,
             detail=f"Cannot reach Ollama at {OLLAMA_URL}: {exc}",
         )
-    data = resp.json()
-    return {
-        "models": [
-            {
-                "name": m["name"],
-                "size": m.get("size"),
-                "parameter_size": m.get("details", {}).get("parameter_size"),
-            }
-            for m in data.get("models", [])
-        ]
-    }
+    return {"models": out}
 
 
 def _dek(user: dict | None) -> bytes | None:
@@ -427,13 +515,17 @@ async def chat(req: ChatRequest,
             model=req.model, user_id=user["id"] if user else None
         )
 
+    images = _validate_images(req.images)
+    file_items = _extract_files(req.files)
+
     conv_id = conv["id"]
     dek = _dek(user)
     history = db.list_messages(conv_id, dek=dek)
 
     # First message titles the conversation.
     if not history:
-        title = req.message.strip().replace("\n", " ")
+        title = (req.message.strip().replace("\n", " ")
+                 or (file_items[0]["name"] if file_items else "Image"))
         db.update_conversation(
             conv_id,
             title=title[:60] + ("…" if len(title) > 60 else ""),
@@ -460,56 +552,109 @@ async def chat(req: ChatRequest,
             elif sources:
                 yield _sse({"type": "sources", "sources": sources})
 
-        db.add_message(conv_id, "user", req.message, dek=dek)
+        db.add_message(conv_id, "user", req.message, images=images or None,
+                       files=file_items or None, dek=dek)
 
         messages = [{
             "role": "system",
             "content": SYSTEM_PROMPT.format(today=date.today().isoformat()),
         }]
-        messages += [
-            {"role": m["role"], "content": m["content"]} for m in history
-        ]
+        for m in history:
+            msg = {"role": m["role"],
+                   "content": _with_file_context(m["content"],
+                                                 m.get("files"))}
+            if m.get("images"):
+                msg["images"] = [_raw_b64(i) for i in m["images"]]
+            messages.append(msg)
         user_content = req.message
         if search_context:
             user_content = (
                 SEARCH_PROMPT.format(context=search_context)
                 + f"\n\nUser request: {req.message}"
             )
-        messages.append({"role": "user", "content": user_content})
+        user_content = _with_file_context(user_content, file_items)
+        user_msg = {"role": "user", "content": user_content}
+        if images:
+            user_msg["images"] = [_raw_b64(i) for i in images]
+        messages.append(user_msg)
 
         assistant_text = ""
+        tool_events = []
+        use_tools = True
+        use_think = req.think is not None
+        thinking_seen = False
         try:
             async with httpx.AsyncClient() as client:
-                async with client.stream(
-                    "POST",
-                    f"{OLLAMA_URL}/api/chat",
-                    json={"model": req.model, "messages": messages,
-                          "stream": True},
-                    timeout=httpx.Timeout(600.0, connect=10.0),
-                ) as resp:
-                    if resp.status_code != 200:
-                        body = (await resp.aread()).decode(errors="replace")
-                        yield _sse({"type": "error",
-                                    "content": f"Ollama error: {body}"})
-                        return
-                    async for line in resp.aiter_lines():
-                        if not line.strip():
-                            continue
-                        chunk = json.loads(line)
-                        token = chunk.get("message", {}).get("content", "")
-                        if token:
-                            assistant_text += token
-                            yield _sse({"type": "token", "content": token})
-                        if chunk.get("done"):
-                            break
+                for round_no in range(MAX_TOOL_ROUNDS + 1):
+                    # Last round gets no tools so the model must answer.
+                    send_tools = use_tools and round_no < MAX_TOOL_ROUNDS
+                    payload = {"model": req.model, "messages": messages,
+                               "stream": True}
+                    if send_tools:
+                        payload["tools"] = tools.TOOL_DEFS
+                    if use_think:
+                        payload["think"] = req.think
+                    tool_calls = []
+                    async with client.stream(
+                        "POST",
+                        f"{OLLAMA_URL}/api/chat",
+                        json=payload,
+                        timeout=httpx.Timeout(600.0, connect=10.0),
+                    ) as resp:
+                        if resp.status_code != 200:
+                            body = (await resp.aread()).decode(
+                                errors="replace")
+                            low = body.lower()
+                            # Model without tool/think support: retry without.
+                            if send_tools and "tool" in low:
+                                use_tools = False
+                                continue
+                            if use_think and "think" in low:
+                                use_think = False
+                                continue
+                            yield _sse({"type": "error",
+                                        "content": f"Ollama error: {body}"})
+                            return
+                        async for line in resp.aiter_lines():
+                            if not line.strip():
+                                continue
+                            chunk = json.loads(line)
+                            msg = chunk.get("message", {})
+                            if msg.get("thinking") and not thinking_seen:
+                                thinking_seen = True
+                                yield _sse({"type": "status",
+                                            "content": "Thinking…"})
+                            token = msg.get("content", "")
+                            if token:
+                                assistant_text += token
+                                yield _sse({"type": "token",
+                                            "content": token})
+                            tool_calls += msg.get("tool_calls") or []
+                            if chunk.get("done"):
+                                break
+
+                    if not tool_calls:
+                        break
+                    messages.append({"role": "assistant", "content": "",
+                                     "tool_calls": tool_calls})
+                    for tc in tool_calls:
+                        fn = tc.get("function", {})
+                        name = fn.get("name", "")
+                        result = tools.execute_tool(
+                            name, fn.get("arguments") or {})
+                        event = {"name": name, **result}
+                        tool_events.append(event)
+                        yield _sse({"type": "tool_event", "event": event})
+                        messages.append({"role": "tool", "tool_name": name,
+                                         "content": json.dumps(result)})
         except httpx.HTTPError as exc:
             yield _sse({"type": "error",
                         "content": f"Cannot reach Ollama: {exc}"})
         finally:
             # Persist whatever was generated, even if the client aborted.
-            if assistant_text:
+            if assistant_text or tool_events:
                 db.add_message(conv_id, "assistant", assistant_text, sources,
-                               dek=dek)
+                               tool_events=tool_events or None, dek=dek)
 
         yield _sse({"type": "done"})
 

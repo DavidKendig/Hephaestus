@@ -10,6 +10,11 @@ your **local Ollama** instance. No Docker, no cloud services, no API keys.
   responses, Markdown rendering, and syntax-highlighted code blocks
 - 🌐 Built-in real-time web search (DuckDuckGo, pure Python) — toggle the
   globe button in the composer and the model answers with cited sources
+- 📁 File-creation tools — ask the model to create text, Word (.docx),
+  Excel (.xlsx), or PDF files; they are saved to your Downloads folder
+- 📎 File uploads — attach a .docx, .xlsx, .pdf, or text/code file from
+  the composer's + menu; it is converted to HTML so the model can read,
+  summarize, or convert it
 - 🗂️ Conversation history stored locally in SQLite (rename, delete, resume)
 - 🖥️ Runs fully offline except for the optional web search
 

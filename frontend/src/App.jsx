@@ -83,13 +83,15 @@ export default function App() {
   }, [])
 
   const send = useCallback(
-    async (text, webSearch) => {
-      if (!text.trim() || streaming || !model) return
+    async (text, webSearch, images = [], files = [], think) => {
+      if ((!text.trim() && !images.length && !files.length)
+          || streaming || !model) return
       setStreaming(true)
       setStatus('')
       setMessages((prev) => [
         ...prev,
-        { id: `u-${Date.now()}`, role: 'user', content: text },
+        { id: `u-${Date.now()}`, role: 'user', content: text, images,
+          files: files.map((f) => ({ name: f.name })) },
         { id: 'pending', role: 'assistant', content: '', pending: true },
       ])
 
@@ -104,7 +106,8 @@ export default function App() {
 
       try {
         await api.streamChat(
-          { conversationId: activeId, model, message: text, webSearch },
+          { conversationId: activeId, model, message: text, webSearch,
+            images, files, think },
           (event) => {
             if (event.type === 'conversation') {
               convId = event.conversation_id
@@ -117,6 +120,11 @@ export default function App() {
             } else if (event.type === 'token') {
               setStatus('')
               patchPending((m) => ({ ...m, content: m.content + event.content }))
+            } else if (event.type === 'tool_event') {
+              patchPending((m) => ({
+                ...m,
+                tool_events: [...(m.tool_events || []), event.event],
+              }))
             } else if (event.type === 'error') {
               patchPending((m) => ({ ...m, error: event.content }))
             }
@@ -218,20 +226,6 @@ export default function App() {
               <SidebarIcon />
             </button>
           )}
-          <select
-            className="model-select"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            disabled={streaming}
-          >
-            {models.length === 0 && <option value="">No models found</option>}
-            {models.map((m) => (
-              <option key={m.name} value={m.name}>
-                {m.name}
-                {m.parameter_size ? ` · ${m.parameter_size}` : ''}
-              </option>
-            ))}
-          </select>
         </header>
         {backendError && (
           <div className="banner-error">
@@ -239,7 +233,18 @@ export default function App() {
           </div>
         )}
         <ChatView messages={messages} status={status} streaming={streaming} />
-        <Composer onSend={send} onStop={stop} streaming={streaming} />
+        <Composer
+          onSend={send}
+          onStop={stop}
+          streaming={streaming}
+          models={models}
+          model={model}
+          onModelChange={setModel}
+          thinkSupported={
+            models.find((m) => m.name === model)
+              ?.capabilities?.includes('thinking') ?? false
+          }
+        />
       </main>
 
       {setupRequired && !backendError && (

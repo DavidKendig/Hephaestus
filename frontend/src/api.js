@@ -78,7 +78,7 @@ export const deleteUser = (id) => del(`/users/${id}`)
  * JSON event: {type: conversation|status|sources|token|error|done, ...}
  */
 export async function streamChat(
-  { conversationId, model, message, webSearch },
+  { conversationId, model, message, webSearch, images, files, think },
   onEvent,
   signal,
 ) {
@@ -90,6 +90,9 @@ export async function streamChat(
       model,
       message,
       web_search: webSearch,
+      images: images?.length ? images : undefined,
+      files: files?.length ? files : undefined,
+      think,
     }),
     signal,
   })

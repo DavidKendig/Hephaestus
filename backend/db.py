@@ -73,6 +73,17 @@ def init_db() -> None:
         if "enc_salt" not in ucols:
             conn.execute("ALTER TABLE users ADD COLUMN enc_salt TEXT")
             conn.execute("ALTER TABLE users ADD COLUMN wrapped_dek TEXT")
+        # Migration: messages created before image attachments existed
+        mcols = [r["name"] for r in conn.execute(
+            "PRAGMA table_info(messages)")]
+        if "images" not in mcols:
+            conn.execute("ALTER TABLE messages ADD COLUMN images TEXT")
+        # Migration: messages created before file-creation tools existed
+        if "tool_events" not in mcols:
+            conn.execute("ALTER TABLE messages ADD COLUMN tool_events TEXT")
+        # Migration: messages created before file uploads existed
+        if "files" not in mcols:
+            conn.execute("ALTER TABLE messages ADD COLUMN files TEXT")
 
 
 def list_conversations(user_id: str | None = None,
@@ -156,39 +167,50 @@ def list_messages(conv_id: str, dek: bytes | None = None) -> list[dict]:
     for r in rows:
         msg = dict(r)
         msg["content"] = crypto.decrypt_text(dek, msg["content"])
-        raw_sources = msg["sources"]
-        if raw_sources:
-            raw_sources = crypto.decrypt_text(dek, raw_sources)
-            try:
-                msg["sources"] = json.loads(raw_sources)
-            except ValueError:
-                msg["sources"] = None
-        else:
-            msg["sources"] = None
+        for field in ("sources", "images", "tool_events", "files"):
+            raw = msg.get(field)
+            if raw:
+                raw = crypto.decrypt_text(dek, raw)
+                try:
+                    msg[field] = json.loads(raw)
+                except ValueError:
+                    msg[field] = None
+            else:
+                msg[field] = None
         out.append(msg)
     return out
 
 
+def _stored_json(value: list | None, dek: bytes | None) -> str | None:
+    if not value:
+        return None
+    stored = json.dumps(value)
+    return crypto.encrypt_text(dek, stored) if dek else stored
+
+
 def add_message(conv_id: str, role: str, content: str,
                 sources: list | None = None,
+                images: list | None = None,
+                tool_events: list | None = None,
+                files: list | None = None,
                 dek: bytes | None = None) -> dict:
-    stored_content = crypto.encrypt_text(dek, content) if dek else content
-    stored_sources = json.dumps(sources) if sources else None
-    if stored_sources and dek:
-        stored_sources = crypto.encrypt_text(dek, stored_sources)
     msg = {
         "id": uuid.uuid4().hex,
         "conversation_id": conv_id,
         "role": role,
-        "content": stored_content,
-        "sources": stored_sources,
+        "content": crypto.encrypt_text(dek, content) if dek else content,
+        "sources": _stored_json(sources, dek),
+        "images": _stored_json(images, dek),
+        "tool_events": _stored_json(tool_events, dek),
+        "files": _stored_json(files, dek),
         "created_at": time.time(),
     }
     with _connect() as conn:
         conn.execute(
             "INSERT INTO messages (id, conversation_id, role, content, sources,"
-            " created_at) VALUES (:id, :conversation_id, :role, :content,"
-            " :sources, :created_at)",
+            " images, tool_events, files, created_at) VALUES (:id,"
+            " :conversation_id, :role, :content, :sources, :images,"
+            " :tool_events, :files, :created_at)",
             msg,
         )
         conn.execute(
@@ -197,6 +219,9 @@ def add_message(conv_id: str, role: str, content: str,
         )
     msg["content"] = content
     msg["sources"] = sources
+    msg["images"] = images
+    msg["tool_events"] = tool_events
+    msg["files"] = files
     return msg
 
 
@@ -291,20 +316,20 @@ def encrypt_existing_history(user_id: str, dek: bytes) -> int:
                 )
                 touched += 1
             msgs = conn.execute(
-                "SELECT id, content, sources FROM messages"
-                " WHERE conversation_id = ?",
+                "SELECT id, content, sources, images, tool_events, files"
+                " FROM messages WHERE conversation_id = ?",
                 (conv["id"],),
             ).fetchall()
             for m in msgs:
                 if crypto.is_encrypted(m["content"]):
                     continue
-                new_sources = (crypto.encrypt_text(dek, m["sources"])
-                               if m["sources"] else None)
+                enc = lambda v: crypto.encrypt_text(dek, v) if v else None
                 conn.execute(
-                    "UPDATE messages SET content = ?, sources = ?"
-                    " WHERE id = ?",
-                    (crypto.encrypt_text(dek, m["content"]), new_sources,
-                     m["id"]),
+                    "UPDATE messages SET content = ?, sources = ?,"
+                    " images = ?, tool_events = ?, files = ? WHERE id = ?",
+                    (crypto.encrypt_text(dek, m["content"]),
+                     enc(m["sources"]), enc(m["images"]),
+                     enc(m["tool_events"]), enc(m["files"]), m["id"]),
                 )
                 touched += 1
     return touched

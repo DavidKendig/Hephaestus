@@ -7,7 +7,7 @@ where python >nul 2>nul || (echo [Hephaestus] Python not found in PATH. & pause 
 where npm >nul 2>nul || (echo [Hephaestus] Node.js/npm not found in PATH. & pause & exit /b 1)
 
 rem First-run setup: install missing dependencies
-python -c "import fastapi, httpx, ddgs, bs4" >nul 2>nul || (
+python -c "import fastapi, httpx, ddgs, bs4, docx, openpyxl, fpdf, mammoth, pypdf" >nul 2>nul || (
     echo [Hephaestus] Installing Python dependencies...
     pip install -r backend\requirements.txt || (pause & exit /b 1)
 )

@@ -9,6 +9,7 @@ export default function Sidebar({
 }) {
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
+  const [mode, setMode] = useState('chat') // visual only for now
 
   if (!open) return null
 
@@ -32,6 +33,37 @@ export default function Sidebar({
             <line x1="9" y1="4" x2="9" y2="20" />
           </svg>
         </button>
+      </div>
+      <div className="mode-toggle">
+        {['chat', 'image', 'code'].map((m) => (
+          <button
+            key={m}
+            className={`mode-option ${mode === m ? 'active' : ''}`}
+            onClick={() => setMode(m)}
+          >
+            {m === 'chat' && (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            )}
+            {m === 'image' && (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="M21 15l-5-5L5 21" />
+              </svg>
+            )}
+            {m === 'code' && (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2">
+                <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+              </svg>
+            )}
+            {m.charAt(0).toUpperCase() + m.slice(1)}
+          </button>
+        ))}
       </div>
       <button className="new-chat-btn" onClick={onNewChat}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
