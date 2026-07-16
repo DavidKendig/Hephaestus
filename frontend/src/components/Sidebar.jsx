@@ -4,8 +4,9 @@ import AccountMenu from './AccountMenu.jsx'
 
 export default function Sidebar({
   open, conversations, activeId, user,
+  models = [], model = '', onModelChange, streaming,
   onToggle, onSelect, onNewChat, onDelete, onRename,
-  onSignIn, onLogout, onManageUsers, onChangePassword, onUserUpdate,
+  onSignIn, onLogout, onOpenSettings, onOpenAdminSettings, onUserUpdate,
 }) {
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
@@ -65,6 +66,18 @@ export default function Sidebar({
           </button>
         ))}
       </div>
+      <select
+        className="model-select-side"
+        title={model || 'Select model'}
+        value={model}
+        onChange={(e) => onModelChange?.(e.target.value)}
+        disabled={streaming}
+      >
+        {models.length === 0 && <option value="">No models</option>}
+        {models.map((m) => (
+          <option key={m.name} value={m.name}>{m.name}</option>
+        ))}
+      </select>
       <button className="new-chat-btn" onClick={onNewChat}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" strokeWidth="2">
@@ -134,8 +147,8 @@ export default function Sidebar({
         user={user}
         onSignIn={onSignIn}
         onLogout={onLogout}
-        onManageUsers={onManageUsers}
-        onChangePassword={onChangePassword}
+        onOpenSettings={onOpenSettings}
+        onOpenAdminSettings={onOpenAdminSettings}
         onUserUpdate={onUserUpdate}
       />
     </aside>

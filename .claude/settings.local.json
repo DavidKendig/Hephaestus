@@ -22,7 +22,9 @@
       "Skill(update-config)",
       "Skill(update-config:*)",
       "Bash(python -m json.tool \".claude/settings.json\")",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "PowerShell($dist = \"frontend\\\\dist\"; if \\(Test-Path $dist\\) { Get-ChildItem \"$dist\\\\assets\" | Select-Object Name, LastWriteTime; \\(Get-Item \"frontend\\\\src\\\\components\\\\Sidebar.jsx\"\\).LastWriteTime } else { \"no dist folder\" })",
+      "PowerShell(\\(Get-Item \"frontend\\\\src\\\\components\\\\Sidebar.jsx\"\\).LastWriteTime; Select-String -Path \"frontend\\\\dist\\\\assets\\\\index-Ci8pxelF.js\" -Pattern \"model-select-side\" -Quiet)"
     ]
   }
 }

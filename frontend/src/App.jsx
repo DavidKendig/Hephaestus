@@ -3,8 +3,9 @@ import Sidebar from './components/Sidebar.jsx'
 import ChatView from './components/ChatView.jsx'
 import Composer from './components/Composer.jsx'
 import {
-  SetupModal, LoginModal, ChangePasswordModal, ManageUsersModal,
+  SetupModal, LoginModal, ChangePasswordModal,
 } from './components/AuthModals.jsx'
+import { SettingsView, AdminSettingsView } from './components/SettingsView.jsx'
 import * as api from './api.js'
 
 export default function App() {
@@ -22,8 +23,7 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [setupRequired, setSetupRequired] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
-  const [showChangePassword, setShowChangePassword] = useState(false)
-  const [showManageUsers, setShowManageUsers] = useState(false)
+  const [view, setView] = useState('chat') // 'chat' | 'settings' | 'admin'
   const abortRef = useRef(null)
 
   const refreshConversations = useCallback(async () => {
@@ -72,6 +72,7 @@ export default function App() {
 
   const openConversation = useCallback(async (id) => {
     abortRef.current?.abort()
+    setView('chat')
     setActiveId(id)
     if (!id) {
       setMessages([])
@@ -179,6 +180,7 @@ export default function App() {
     abortRef.current?.abort()
     setUser(nextUser)
     setSetupRequired(false)
+    setView('chat')
     setActiveId(null)
     setMessages([])
     api.listConversations()
@@ -204,6 +206,10 @@ export default function App() {
         conversations={conversations}
         activeId={activeId}
         user={user}
+        models={models}
+        model={model}
+        onModelChange={setModel}
+        streaming={streaming}
         onToggle={() => setSidebarOpen((v) => !v)}
         onSelect={openConversation}
         onNewChat={() => openConversation(null)}
@@ -211,8 +217,8 @@ export default function App() {
         onRename={renameConversation}
         onSignIn={() => setShowLogin(true)}
         onLogout={handleLogout}
-        onManageUsers={() => setShowManageUsers(true)}
-        onChangePassword={() => setShowChangePassword(true)}
+        onOpenSettings={() => setView('settings')}
+        onOpenAdminSettings={() => setView('admin')}
         onUserUpdate={setUser}
       />
       <main className="main">
@@ -232,19 +238,31 @@ export default function App() {
             Backend problem: {backendError}. Is Ollama running?
           </div>
         )}
-        <ChatView messages={messages} status={status} streaming={streaming} />
-        <Composer
-          onSend={send}
-          onStop={stop}
-          streaming={streaming}
-          models={models}
-          model={model}
-          onModelChange={setModel}
-          thinkSupported={
-            models.find((m) => m.name === model)
-              ?.capabilities?.includes('thinking') ?? false
-          }
-        />
+        {view === 'admin' && user?.is_admin ? (
+          <AdminSettingsView
+            currentUser={user}
+            onClose={() => setView('chat')}
+          />
+        ) : view === 'settings' && user ? (
+          <SettingsView onClose={() => setView('chat')} />
+        ) : (
+          <>
+            <ChatView
+              messages={messages}
+              status={status}
+              streaming={streaming}
+            />
+            <Composer
+              onSend={send}
+              onStop={stop}
+              streaming={streaming}
+              thinkSupported={
+                models.find((m) => m.name === model)
+                  ?.capabilities?.includes('thinking') ?? false
+              }
+            />
+          </>
+        )}
       </main>
 
       {setupRequired && !backendError && (
@@ -257,18 +275,6 @@ export default function App() {
         <ChangePasswordModal
           forced
           onDone={() => setUser({ ...user, must_change_password: false })}
-        />
-      )}
-      {showChangePassword && user && !user.must_change_password && (
-        <ChangePasswordModal
-          onDone={() => setShowChangePassword(false)}
-          onClose={() => setShowChangePassword(false)}
-        />
-      )}
-      {showManageUsers && user?.is_admin && (
-        <ManageUsersModal
-          currentUser={user}
-          onClose={() => setShowManageUsers(false)}
         />
       )}
     </div>

@@ -123,8 +123,8 @@ export function LoginModal({ onDone, onClose }) {
   )
 }
 
-/** Change password; `forced` (temp password) mode cannot be dismissed. */
-export function ChangePasswordModal({ forced, onDone, onClose }) {
+/** Change-password form, reusable in a modal or a settings pane. */
+export function ChangePasswordForm({ forced, onDone }) {
   const [current, setCurrent] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -141,6 +141,10 @@ export function ChangePasswordModal({ forced, onDone, onClose }) {
     setError('')
     try {
       await api.changePassword(current, password)
+      setCurrent('')
+      setPassword('')
+      setConfirm('')
+      setBusy(false)
       onDone()
     } catch (err) {
       setError(err.message)
@@ -148,6 +152,30 @@ export function ChangePasswordModal({ forced, onDone, onClose }) {
     }
   }
 
+  return (
+    <form onSubmit={submit} className="modal-form">
+      <label>{forced ? 'Temporary password' : 'Current password'}
+        <input type="password" value={current} autoFocus required
+          onChange={(e) => setCurrent(e.target.value)} />
+      </label>
+      <label>New password <span className="hint">(min 8 characters)</span>
+        <input type="password" value={password} required minLength={8}
+          onChange={(e) => setPassword(e.target.value)} />
+      </label>
+      <label>Confirm new password
+        <input type="password" value={confirm} required
+          onChange={(e) => setConfirm(e.target.value)} />
+      </label>
+      <FormError error={error} />
+      <button className="primary-btn" disabled={busy}>
+        {busy ? 'Saving…' : 'Save new password'}
+      </button>
+    </form>
+  )
+}
+
+/** Change password; `forced` (temp password) mode cannot be dismissed. */
+export function ChangePasswordModal({ forced, onDone, onClose }) {
   return (
     <Modal
       title={forced ? 'Set a new password' : 'Change password'}
@@ -159,30 +187,13 @@ export function ChangePasswordModal({ forced, onDone, onClose }) {
           to continue.
         </p>
       )}
-      <form onSubmit={submit} className="modal-form">
-        <label>{forced ? 'Temporary password' : 'Current password'}
-          <input type="password" value={current} autoFocus required
-            onChange={(e) => setCurrent(e.target.value)} />
-        </label>
-        <label>New password <span className="hint">(min 8 characters)</span>
-          <input type="password" value={password} required minLength={8}
-            onChange={(e) => setPassword(e.target.value)} />
-        </label>
-        <label>Confirm new password
-          <input type="password" value={confirm} required
-            onChange={(e) => setConfirm(e.target.value)} />
-        </label>
-        <FormError error={error} />
-        <button className="primary-btn" disabled={busy}>
-          {busy ? 'Saving…' : 'Save new password'}
-        </button>
-      </form>
+      <ChangePasswordForm forced={forced} onDone={onDone} />
     </Modal>
   )
 }
 
 /** Admin panel: master list of accounts with add / reset / delete. */
-export function ManageUsersModal({ currentUser, onClose }) {
+export function ManageUsersPanel({ currentUser }) {
   const [users, setUsers] = useState([])
   const [error, setError] = useState('')
   const [newName, setNewName] = useState('')
@@ -254,7 +265,7 @@ export function ManageUsersModal({ currentUser, onClose }) {
   }
 
   return (
-    <Modal title="Manage users" onClose={onClose} wide>
+    <>
       <form className="add-user-row" onSubmit={add}>
         <input
           placeholder="New username…"
@@ -324,6 +335,6 @@ export function ManageUsersModal({ currentUser, onClose }) {
           </div>
         ))}
       </div>
-    </Modal>
+    </>
   )
 }

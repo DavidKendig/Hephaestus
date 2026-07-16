@@ -10,7 +10,7 @@ const DOC_ACCEPT = [
 ].join(',')
 
 export default function Composer({
-  onSend, onStop, streaming, models = [], model = '', onModelChange,
+  onSend, onStop, streaming,
   thinkSupported = false,
 }) {
   const [text, setText] = useState('')
@@ -147,6 +147,25 @@ export default function Composer({
                 </svg>
                 {webSearch && <span>Search</span>}
               </button>
+              <button
+                className={`think-btn ${think && thinkSupported ? 'on' : ''}`}
+                title={
+                  !thinkSupported
+                    ? 'Thinking mode: not supported by this model'
+                    : think
+                      ? 'Thinking mode: on'
+                      : 'Thinking mode: off (regular)'
+                }
+                disabled={!thinkSupported}
+                onClick={() => setThink((v) => !v)}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2">
+                  <path d="M9 18h6M10 22h4" />
+                  <path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0 0 12 2z" />
+                </svg>
+                {think && thinkSupported && <span>Think</span>}
+              </button>
               <div className="tools-wrap" ref={toolsRef}>
             <button
               className={`plus-btn ${toolsOpen ? 'open' : ''}`}
@@ -181,25 +200,6 @@ export default function Composer({
             )}
               </div>
             </div>
-            <button
-              className={`think-btn ${think && thinkSupported ? 'on' : ''}`}
-              title={
-                !thinkSupported
-                  ? 'Thinking mode: not supported by this model'
-                  : think
-                    ? 'Thinking mode: on'
-                    : 'Thinking mode: off (regular)'
-              }
-              disabled={!thinkSupported}
-              onClick={() => setThink((v) => !v)}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2">
-                <path d="M9 18h6M10 22h4" />
-                <path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0 0 12 2z" />
-              </svg>
-              {think && thinkSupported && <span>Think</span>}
-            </button>
           </div>
           <input
             ref={fileRef}
@@ -242,18 +242,6 @@ export default function Composer({
                 </svg>
               </button>
             )}
-            <select
-              className="model-select-mini"
-              title={model || 'Select model'}
-              value={model}
-              onChange={(e) => onModelChange?.(e.target.value)}
-              disabled={streaming}
-            >
-              {models.length === 0 && <option value="">No models</option>}
-              {models.map((m) => (
-                <option key={m.name} value={m.name}>{m.name}</option>
-              ))}
-            </select>
           </div>
         </div>
       </div>
