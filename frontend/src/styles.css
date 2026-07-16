@@ -185,6 +185,31 @@ body {
   padding: 10px 16px;
 }
 
+.banner-debug {
+  background: rgba(240, 180, 60, 0.14);
+  border-bottom: 1px solid rgba(240, 180, 60, 0.5);
+  color: #f0c454;
+  padding: 8px 16px;
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.debug-login-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(240, 180, 60, 0.14);
+  border: 1px solid rgba(240, 180, 60, 0.5);
+  border-radius: 10px;
+  color: #f0c454;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.debug-login-btn:hover:not(:disabled) {
+  background: rgba(240, 180, 60, 0.24);
+}
+
 .banner-error {
   margin: 0 auto;
   max-width: 720px;
@@ -894,6 +919,90 @@ body {
   color: #7ee787;
   font-size: 13px;
   margin: 0 0 10px;
+}
+
+.settings-note {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 0 0 14px;
+}
+
+.settings-note a { color: var(--text); }
+
+.hw-missing p {
+  font-size: 13.5px;
+  margin: 0 0 10px;
+}
+
+.hw-install {
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12.5px;
+  margin: 0 0 12px;
+  overflow-x: auto;
+}
+
+.hw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.hw-chip {
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+
+.hw-chip em {
+  font-style: normal;
+  color: var(--text-dim);
+  margin-right: 5px;
+}
+
+.hw-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+
+.hw-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.hw-table th, .hw-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.hw-table th {
+  color: var(--text-dim);
+  font-weight: 500;
+  background: var(--bg-main);
+}
+
+.hw-table tr:last-child td { border-bottom: none; }
+
+.hw-raw {
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12px;
+  margin: 12px 0 0;
+  overflow-x: auto;
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 /* ---------- Modals ---------- */

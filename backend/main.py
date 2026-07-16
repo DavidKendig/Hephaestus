@@ -1,8 +1,12 @@
 """Hephaestus backend: FastAPI bridge between the Electron UI and Ollama."""
 
+import asyncio
 import json
 import os
+import shutil
+import subprocess
 import sys
+import sysconfig
 import threading
 import time
 from datetime import date
@@ -24,6 +28,12 @@ import websearch
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 HOST = os.environ.get("HEPH_HOST", "127.0.0.1")
 PORT = int(os.environ.get("HEPH_PORT", "8155"))
+
+# HEPH_DEBUG=1 skips sign-in: a throwaway "debug-admin" account is
+# recreated on every debug start and auto-deleted on normal starts.
+DEBUG_MODE = os.environ.get("HEPH_DEBUG") == "1"
+DEBUG_USERNAME = "debug-admin"
+DEBUG_TOKEN: str | None = None
 
 SYSTEM_PROMPT = (
     "You are Hephaestus, a helpful AI assistant running locally on the"
@@ -243,9 +253,21 @@ async def health():
 @app.get("/api/auth/status")
 async def auth_status(user: dict | None = Depends(current_user)):
     return {
-        "setup_required": db.count_users() == 0,
+        "setup_required": not DEBUG_MODE and db.count_users() == 0,
         "user": _public_user(user) if user else None,
+        "debug": DEBUG_MODE,
     }
+
+
+@app.post("/api/auth/debug-login")
+async def auth_debug_login():
+    """Hand out the pre-minted debug session (debug mode only)."""
+    if not DEBUG_MODE or not DEBUG_TOKEN:
+        raise HTTPException(status_code=404, detail="Not found")
+    user = db.get_session_user(DEBUG_TOKEN)
+    if not user or DEBUG_TOKEN not in SESSION_DEKS:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"token": DEBUG_TOKEN, "user": _public_user(user)}
 
 
 def _create_user_keys(user_id: str, password: str) -> bytes:
@@ -273,6 +295,34 @@ def _unlock_dek(user: dict, password: str) -> bytes:
     return dek
 
 
+def _init_debug_account() -> None:
+    """Create (debug mode) or remove (normal mode) the throwaway admin.
+
+    The account gets a random password that is never revealed, so the
+    only way in is the pre-minted session below — and normal startups
+    delete the account entirely, along with its conversations.
+    """
+    global DEBUG_TOKEN
+    existing = db.get_user_by_username(DEBUG_USERNAME)
+    if existing:
+        db.delete_user(existing["id"])
+    if not DEBUG_MODE:
+        return
+    password = os.urandom(32).hex()
+    salt, digest = auth.hash_password(password)
+    user = db.create_user(DEBUG_USERNAME, salt, digest, is_admin=True)
+    dek = _create_user_keys(user["id"], password)
+    DEBUG_TOKEN = auth.generate_session_token()
+    db.create_session(DEBUG_TOKEN, user["id"])
+    SESSION_DEKS[DEBUG_TOKEN] = dek
+    print(f"[Hephaestus] WARNING: HEPH_DEBUG=1 — signed in as"
+          f" '{DEBUG_USERNAME}' without authentication. Do not use"
+          f" this mode with real data.", file=sys.stderr)
+
+
+_init_debug_account()
+
+
 @app.post("/api/auth/setup")
 async def auth_setup(req: SetupRequest):
     if db.count_users() > 0:
@@ -291,6 +341,10 @@ async def auth_setup(req: SetupRequest):
 
 @app.post("/api/auth/login")
 async def auth_login(req: LoginRequest):
+    if req.username.strip().lower() == DEBUG_USERNAME:
+        # The debug account is session-injected only, never logged into.
+        raise HTTPException(status_code=401,
+                            detail="Invalid username or password")
     user = db.get_user_by_username(req.username.strip())
     if not user or not auth.verify_password(
         req.password, user["password_salt"], user["password_hash"]
@@ -455,6 +509,54 @@ async def models():
             detail=f"Cannot reach Ollama at {OLLAMA_URL}: {exc}",
         )
     return {"models": out}
+
+
+def _find_llmfit() -> str | None:
+    exe = shutil.which("llmfit")
+    if exe:
+        return exe
+    # `pip install --user llmfit` lands in a Scripts dir that is often
+    # not on PATH (notably with the Microsoft Store Python).
+    name = "llmfit.exe" if os.name == "nt" else "llmfit"
+    for scheme in (f"{os.name}_user", None):
+        try:
+            scripts = (sysconfig.get_path("scripts", scheme) if scheme
+                       else sysconfig.get_path("scripts"))
+        except KeyError:
+            continue
+        candidate = os.path.join(scripts, name)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+@app.get("/api/hardware")
+async def hardware(_: dict = Depends(require_user)):
+    """What models fit this machine, via the llmfit CLI (if installed)."""
+    exe = _find_llmfit()
+    if not exe:
+        return {"installed": False}
+
+    def run():
+        return subprocess.run(
+            [exe, "recommend", "--json"],
+            capture_output=True, text=True, timeout=120,
+        )
+
+    try:
+        proc = await asyncio.to_thread(run)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="llmfit timed out")
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()[:500]
+        raise HTTPException(status_code=502,
+                            detail=detail or "llmfit failed")
+    try:
+        report = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502,
+                            detail="llmfit returned unexpected output")
+    return {"installed": True, "report": report}
 
 
 def _dek(user: dict | None) -> bytes | None:

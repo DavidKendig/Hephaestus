@@ -45,6 +45,7 @@ const del = (path) =>
 
 // Models & conversations
 export const getModels = () => get('/models')
+export const getHardware = () => get('/hardware')
 export const listConversations = () => get('/conversations')
 export const getConversation = (id) => get(`/conversations/${id}`)
 export const deleteConversation = (id) => del(`/conversations/${id}`)
@@ -62,6 +63,7 @@ export const setup = (username, password) =>
 export const login = (username, password) =>
   post('/auth/login', { username, password })
 export const logout = () => post('/auth/logout')
+export const debugLogin = () => post('/auth/debug-login')
 export const changePassword = (current_password, new_password) =>
   post('/auth/change-password', { current_password, new_password })
 export const setAvatar = (avatar) => post('/auth/avatar', { avatar })

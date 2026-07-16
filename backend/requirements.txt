@@ -9,3 +9,4 @@ openpyxl>=3.1
 fpdf2>=2.7
 mammoth>=1.8
 pypdf>=5.0
+llmfit>=1.1
