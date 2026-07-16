@@ -18,7 +18,11 @@
       "Bash(python -m json.tool)",
       "Bash(curl -s -N --max-time 240 http://127.0.0.1:8156/api/chat -H \"Content-Type: application/json\" -d '{\"model\":\"gemma4:e4b\",\"message\":\"Reply with exactly: OK\",\"think\":false}')",
       "Bash(curl -s -N --max-time 240 http://127.0.0.1:8156/api/chat -H \"Content-Type: application/json\" -d '{\"model\":\"gemma4:e4b\",\"message\":\"Reply with exactly: OK\",\"think\":true}')",
-      "Bash(taskkill //PID 37652 //F)"
+      "Bash(taskkill //PID 37652 //F)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(python -m json.tool \".claude/settings.json\")",
+      "Bash(git check-ignore *)"
     ]
   }
 }
