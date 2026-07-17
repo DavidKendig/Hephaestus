@@ -1,0 +1,11 @@
+# Optional dependencies for local image generation (Ideogram 4).
+# Install with:  pip install -r backend/requirements-image.txt
+#
+# On machines without an NVIDIA GPU, install the CPU build of torch
+# first to avoid the multi-GB CUDA download:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.4
+ideogram4 @ git+https://github.com/ideogram-oss/ideogram4
+# Note: the runtime's create_causal_mask call is version-sensitive;
+# imagegen.py shims transformers 4.57/5.1 automatically, so any recent
+# transformers works and no pin is needed here.

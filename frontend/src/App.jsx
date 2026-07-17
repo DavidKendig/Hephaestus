@@ -23,6 +23,11 @@ export default function App() {
   const [model, setModel] = useState(
     () => localStorage.getItem('heph-model') || '',
   )
+  // Image generation models, hosted by the backend (pane: image).
+  const [imageInfo, setImageInfo] = useState({ installed: true, models: [] })
+  const [imageModel, setImageModel] = useState(
+    () => localStorage.getItem('heph-image-model') || '',
+  )
   const [pane, setPane] = useState(
     () => localStorage.getItem('heph-pane') || 'chat',
   )
@@ -65,6 +70,17 @@ export default function App() {
     })
   }, [])
 
+  const refreshImageModels = useCallback(async () => {
+    const data = await api.getImageModels()
+    setImageInfo(data)
+    setImageModel((current) => {
+      if (current && data.models.some((m) => m.name === current)) {
+        return current
+      }
+      return data.models[0]?.name || ''
+    })
+  }, [])
+
   const openConversation = useCallback(async (id) => {
     abortRef.current?.abort()
     setView('chat')
@@ -96,6 +112,9 @@ export default function App() {
         if (!cancelled) setBackendError(err.message)
       }
       try {
+        if (!cancelled) await refreshImageModels()
+      } catch { /* backend down; error already surfaced */ }
+      try {
         const status = await api.authStatus()
         if (cancelled) return
         setSetupRequired(status.setup_required)
@@ -117,11 +136,16 @@ export default function App() {
     }
     boot()
     return () => { cancelled = true }
-  }, [refreshConversations, refreshModels, openConversation])
+  }, [refreshConversations, refreshModels, refreshImageModels,
+    openConversation])
 
   useEffect(() => {
     if (model) localStorage.setItem('heph-model', model)
   }, [model])
+
+  useEffect(() => {
+    if (imageModel) localStorage.setItem('heph-image-model', imageModel)
+  }, [imageModel])
 
   // Remember the active conversation for the current pane, surviving
   // pane switches and restarts.
@@ -205,6 +229,63 @@ export default function App() {
       }
     },
     [activeId, model, streaming, refreshConversations],
+  )
+
+  const sendImage = useCallback(
+    async (text) => {
+      if (!text.trim() || streaming || !imageModel) return
+      setStreaming(true)
+      setStatus('')
+      setMessages((prev) => [
+        ...prev,
+        { id: `u-${Date.now()}`, role: 'user', content: text },
+        { id: 'pending', role: 'assistant', content: '', pending: true },
+      ])
+
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      const patchPending = (fn) =>
+        setMessages((prev) =>
+          prev.map((m) => (m.id === 'pending' ? fn(m) : m)),
+        )
+
+      try {
+        await api.streamImage(
+          { conversationId: activeId, model: imageModel, message: text },
+          (event) => {
+            if (event.type === 'conversation') {
+              setActiveId(event.conversation_id)
+            } else if (event.type === 'status') {
+              setStatus(event.content)
+            } else if (event.type === 'image') {
+              setStatus('')
+              patchPending((m) => ({ ...m, images: [event.content] }))
+            } else if (event.type === 'error') {
+              patchPending((m) => ({ ...m, error: event.content }))
+            }
+          },
+          controller.signal,
+        )
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          patchPending((m) => ({ ...m, error: err.message }))
+        }
+      } finally {
+        setStreaming(false)
+        setStatus('')
+        abortRef.current = null
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === 'pending'
+              ? { ...m, id: `a-${Date.now()}`, pending: false }
+              : m,
+          ),
+        )
+        refreshConversations().catch(() => {})
+      }
+    },
+    [activeId, imageModel, streaming, refreshConversations],
   )
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
@@ -300,9 +381,9 @@ export default function App() {
         user={user}
         pane={pane}
         onPaneChange={switchPane}
-        models={models}
-        model={model}
-        onModelChange={setModel}
+        models={pane === 'image' ? imageInfo.models : models}
+        model={pane === 'image' ? imageModel : model}
+        onModelChange={pane === 'image' ? setImageModel : setModel}
         streaming={streaming}
         onToggle={() => setSidebarOpen((v) => !v)}
         onSelect={openConversation}
@@ -359,18 +440,27 @@ export default function App() {
           />
         ) : (
           <>
+            {pane === 'image' && !imageInfo.installed && (
+              <div className="banner-debug">
+                Image generation runtime is not installed. Run{' '}
+                <code>pip install -r backend/requirements-image.txt</code>
+                {' '}and restart Hephaestus.
+              </div>
+            )}
             <ChatView
               messages={messages}
               status={status}
               streaming={streaming}
             />
             <Composer
-              onSend={send}
+              mode={pane === 'image' ? 'image' : 'chat'}
+              onSend={pane === 'image' ? sendImage : send}
               onStop={stop}
               streaming={streaming}
               thinkSupported={
-                models.find((m) => m.name === model)
-                  ?.capabilities?.includes('thinking') ?? false
+                pane !== 'image'
+                && (models.find((m) => m.name === model)
+                  ?.capabilities?.includes('thinking') ?? false)
               }
             />
           </>

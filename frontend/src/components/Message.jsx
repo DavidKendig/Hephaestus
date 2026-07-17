@@ -94,6 +94,16 @@ export default function Message({ message, streaming }) {
           </div>
         )}
         {isThinking && <span className="thinking-dot" />}
+        {message.images?.length > 0 && (
+          <div className="msg-images generated">
+            {message.images.map((src, i) => (
+              <a key={i} href={src} download="hephaestus-image.png"
+                title="Download image">
+                <img src={src} alt="generated" />
+              </a>
+            ))}
+          </div>
+        )}
         <div className="markdown">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}

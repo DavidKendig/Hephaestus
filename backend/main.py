@@ -22,6 +22,7 @@ import auth
 import crypto
 import db
 import filereader
+import imagegen
 import tools
 import websearch
 
@@ -113,6 +114,15 @@ class AvatarRequest(BaseModel):
 
 class PullModelRequest(BaseModel):
     model: str
+
+
+class ImageGenRequest(BaseModel):
+    conversation_id: str | None = None
+    model: str
+    message: str
+    width: int | None = None
+    height: int | None = None
+    seed: int | None = None
 
 
 def _sse(payload: dict) -> str:
@@ -563,6 +573,98 @@ async def pull_model(req: PullModelRequest,
             return
         # The fresh model's capabilities are unknown — drop any stale entry.
         _caps_cache.pop(name, None)
+        yield _sse({"type": "done"})
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------- Image generation ----------
+
+def _image_dim(value: int | None, default: int = 1024) -> int:
+    """Clamp to Ideogram 4's supported range: 256-2048, multiples of 16."""
+    if value is None:
+        return default
+    return max(256, min(2048, (value // 16) * 16))
+
+
+@app.get("/api/image/models")
+async def image_models():
+    return {"installed": imagegen.deps_installed(),
+            "models": imagegen.list_models()}
+
+
+@app.post("/api/image/generate")
+async def image_generate(req: ImageGenRequest,
+                         user: dict | None = Depends(current_user)):
+    if not imagegen.deps_installed():
+        raise HTTPException(
+            status_code=503,
+            detail="Image generation runtime is not installed. Run:"
+                   " pip install -r backend/requirements-image.txt"
+                   " and restart Hephaestus.",
+        )
+    prompt = req.message.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt required")
+
+    if req.conversation_id:
+        conv = _owned_conversation(req.conversation_id, user)
+    else:
+        conv = db.create_conversation(
+            model=req.model, user_id=user["id"] if user else None
+        )
+    conv_id = conv["id"]
+    dek = _dek(user)
+
+    if not db.list_messages(conv_id, dek=dek):
+        title = prompt.replace("\n", " ")
+        db.update_conversation(
+            conv_id,
+            title=title[:60] + ("…" if len(title) > 60 else ""),
+            model=req.model,
+            dek=dek,
+        )
+    else:
+        db.update_conversation(conv_id, model=req.model)
+
+    width = _image_dim(req.width)
+    height = _image_dim(req.height)
+
+    async def stream():
+        yield _sse({"type": "conversation", "conversation_id": conv_id,
+                    "title": db.get_conversation(conv_id, dek=dek)["title"]})
+        db.add_message(conv_id, "user", prompt, dek=dek)
+
+        loop = asyncio.get_running_loop()
+        events: asyncio.Queue = asyncio.Queue()
+
+        def progress(msg: str) -> None:
+            loop.call_soon_threadsafe(
+                events.put_nowait, {"type": "status", "content": msg})
+
+        fut = asyncio.ensure_future(asyncio.to_thread(
+            imagegen.generate, req.model, prompt,
+            width=width, height=height, seed=req.seed, progress=progress,
+        ))
+        while not fut.done():
+            try:
+                yield _sse(await asyncio.wait_for(events.get(), timeout=0.5))
+            except asyncio.TimeoutError:
+                pass
+        while not events.empty():
+            yield _sse(events.get_nowait())
+
+        try:
+            data_url = fut.result()
+        except Exception as exc:  # torch/HF errors are worth surfacing
+            yield _sse({"type": "error", "content": str(exc)[:2000]})
+            return
+        db.add_message(conv_id, "assistant", "", images=[data_url], dek=dek)
+        yield _sse({"type": "image", "content": data_url})
         yield _sse({"type": "done"})
 
     return StreamingResponse(
