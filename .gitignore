@@ -9,6 +9,10 @@ node_modules/
 frontend/dist/
 frontend/out/
 
+# Model weights
+*.safetensors
+*.gguf
+
 # Misc
 .DS_Store
 *.log

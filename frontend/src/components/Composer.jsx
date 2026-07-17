@@ -12,7 +12,9 @@ const DOC_ACCEPT = [
 export default function Composer({
   onSend, onStop, streaming,
   thinkSupported = false,
+  mode = 'chat', // 'chat' | 'image'
 }) {
+  const imageMode = mode === 'image'
   const [text, setText] = useState('')
   const [webSearch, setWebSearch] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -133,6 +135,7 @@ export default function Composer({
           </div>
         )}
         <div className="composer-row">
+          {!imageMode && (
           <div className="composer-side left">
             <div className="composer-side-row">
               <button
@@ -201,6 +204,7 @@ export default function Composer({
               </div>
             </div>
           </div>
+          )}
           <input
             ref={fileRef}
             type="file"
@@ -218,7 +222,9 @@ export default function Composer({
           <textarea
             ref={textareaRef}
             rows={1}
-            placeholder="Message Hephaestus…"
+            placeholder={imageMode
+              ? 'Describe the image to generate…'
+              : 'Message Hephaestus…'}
             value={text}
             onChange={autosize}
             onKeyDown={onKeyDown}
@@ -246,8 +252,11 @@ export default function Composer({
         </div>
       </div>
       <p className="composer-hint">
-        AI models can make mistakes. Enter to send · Shift+Enter for a new
-        line.
+        {mode === 'image'
+          ? 'Images are generated locally on this machine and may take a'
+            + ' while. Enter to send.'
+          : 'AI models can make mistakes. Enter to send · Shift+Enter for'
+            + ' a new line.'}
       </p>
     </div>
   )

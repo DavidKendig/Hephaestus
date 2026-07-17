@@ -45,6 +45,7 @@ const del = (path) =>
 
 // Models & conversations
 export const getModels = () => get('/models')
+export const getImageModels = () => get('/image/models')
 export const getHardware = () => get('/hardware')
 export const listConversations = () => get('/conversations')
 export const getConversation = (id) => get(`/conversations/${id}`)
@@ -110,6 +111,31 @@ export async function pullModel(model, onEvent, signal) {
     method: 'POST',
     headers: headers(true),
     body: JSON.stringify({ model }),
+    signal,
+  })
+  await readSse(resp, onEvent)
+}
+
+/**
+ * POST /api/image/generate and parse the SSE stream, invoking onEvent
+ * for each JSON event: {type: conversation|status|image|error|done, ...}
+ */
+export async function streamImage(
+  { conversationId, model, message, width, height, seed },
+  onEvent,
+  signal,
+) {
+  const resp = await fetch(`${API_BASE}/image/generate`, {
+    method: 'POST',
+    headers: headers(true),
+    body: JSON.stringify({
+      conversation_id: conversationId,
+      model,
+      message,
+      width,
+      height,
+      seed,
+    }),
     signal,
   })
   await readSse(resp, onEvent)
