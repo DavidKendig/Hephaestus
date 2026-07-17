@@ -6,7 +6,7 @@ import {
   SetupModal, LoginModal, ChangePasswordModal,
 } from './components/AuthModals.jsx'
 import {
-  SettingsView, AdminSettingsView, HardwareView,
+  SettingsView, AdminSettingsView, ModelsView,
 } from './components/SettingsView.jsx'
 import * as api from './api.js'
 
@@ -37,7 +37,13 @@ export default function App() {
   const [setupRequired, setSetupRequired] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
   const [debugMode, setDebugMode] = useState(false)
-  const [view, setView] = useState('chat') // 'chat' | 'settings' | 'admin'
+  // 'chat' | 'settings' | 'admin' | 'models'
+  const [view, setView] = useState('chat')
+  // Current model download: {name, status, pct, done, error, cancelled}.
+  // Lives here (not in ModelsView) so the download keeps streaming and
+  // the menu badge stays live while the pane is closed.
+  const [modelPull, setModelPull] = useState(null)
+  const pullAbortRef = useRef(null)
   const abortRef = useRef(null)
   // Last active conversation per pane (chat / image / code), kept across
   // pane switches and app restarts.
@@ -46,6 +52,17 @@ export default function App() {
   const refreshConversations = useCallback(async () => {
     const data = await api.listConversations()
     setConversations(data.conversations)
+  }, [])
+
+  const refreshModels = useCallback(async () => {
+    const data = await api.getModels()
+    setModels(data.models)
+    setModel((current) => {
+      if (current && data.models.some((m) => m.name === current)) {
+        return current
+      }
+      return data.models[0]?.name || ''
+    })
   }, [])
 
   const openConversation = useCallback(async (id) => {
@@ -72,15 +89,8 @@ export default function App() {
     let cancelled = false
     async function boot() {
       try {
-        const data = await api.getModels()
+        await refreshModels()
         if (cancelled) return
-        setModels(data.models)
-        setModel((current) => {
-          if (current && data.models.some((m) => m.name === current)) {
-            return current
-          }
-          return data.models[0]?.name || ''
-        })
         setBackendError('')
       } catch (err) {
         if (!cancelled) setBackendError(err.message)
@@ -107,7 +117,7 @@ export default function App() {
     }
     boot()
     return () => { cancelled = true }
-  }, [refreshConversations, openConversation])
+  }, [refreshConversations, refreshModels, openConversation])
 
   useEffect(() => {
     if (model) localStorage.setItem('heph-model', model)
@@ -199,6 +209,41 @@ export default function App() {
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
 
+  const startModelPull = useCallback(async (name) => {
+    if (pullAbortRef.current) return // one download at a time
+    setModelPull({ name, status: 'Starting…', pct: null })
+    const controller = new AbortController()
+    pullAbortRef.current = controller
+    try {
+      await api.pullModel(name, (event) => {
+        if (event.type === 'progress') {
+          setModelPull({
+            name,
+            status: event.status || 'Downloading…',
+            pct: event.total
+              ? Math.round(((event.completed || 0) / event.total) * 100)
+              : null,
+          })
+        } else if (event.type === 'error') {
+          setModelPull({ name, error: event.content })
+        } else if (event.type === 'done') {
+          setModelPull({ name, done: true })
+        }
+      }, controller.signal)
+    } catch (err) {
+      setModelPull(err.name === 'AbortError'
+        ? { name, cancelled: true }
+        : { name, error: err.message })
+    } finally {
+      pullAbortRef.current = null
+      refreshModels().catch(() => {})
+    }
+  }, [refreshModels])
+
+  const cancelModelPull = useCallback(() => {
+    pullAbortRef.current?.abort()
+  }, [])
+
   const removeConversation = useCallback(
     async (id) => {
       await api.deleteConversation(id)
@@ -268,7 +313,8 @@ export default function App() {
         onLogout={handleLogout}
         onOpenSettings={() => setView('settings')}
         onOpenAdminSettings={() => setView('admin')}
-        onOpenHardware={() => setView('hardware')}
+        onOpenModels={() => setView('models')}
+        modelPull={modelPull}
         onUserUpdate={setUser}
       />
       <main className="main">
@@ -302,8 +348,15 @@ export default function App() {
           />
         ) : view === 'settings' && user ? (
           <SettingsView onClose={() => setView('chat')} />
-        ) : view === 'hardware' && user ? (
-          <HardwareView onClose={() => setView('chat')} />
+        ) : view === 'models' && user ? (
+          <ModelsView
+            models={models}
+            pull={modelPull}
+            onPull={startModelPull}
+            onCancelPull={cancelModelPull}
+            onRefresh={() => refreshModels().catch(() => {})}
+            onClose={() => setView('chat')}
+          />
         ) : (
           <>
             <ChatView
