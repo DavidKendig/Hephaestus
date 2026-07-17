@@ -98,6 +98,24 @@ export async function streamChat(
     }),
     signal,
   })
+  await readSse(resp, onEvent)
+}
+
+/**
+ * POST /api/models/pull and parse the SSE stream, invoking onEvent for
+ * each JSON event: {type: progress|error|done, ...}
+ */
+export async function pullModel(model, onEvent, signal) {
+  const resp = await fetch(`${API_BASE}/models/pull`, {
+    method: 'POST',
+    headers: headers(true),
+    body: JSON.stringify({ model }),
+    signal,
+  })
+  await readSse(resp, onEvent)
+}
+
+async function readSse(resp, onEvent) {
   if (!resp.ok) {
     let detail = resp.statusText
     try {

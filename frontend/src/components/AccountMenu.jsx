@@ -59,7 +59,7 @@ function fileToAvatar(file) {
 
 export default function AccountMenu({
   user, onSignIn, onLogout, onOpenSettings, onOpenAdminSettings,
-  onOpenHardware, onUserUpdate,
+  onOpenModels, modelPull, onUserUpdate,
 }) {
   const [open, setOpen] = useState(false)
   const [avatarError, setAvatarError] = useState('')
@@ -142,8 +142,9 @@ export default function AccountMenu({
           <button className="account-menu-item" onClick={pick(onOpenSettings)}>
             <GearIcon /> Settings
           </button>
-          <button className="account-menu-item" onClick={pick(onOpenHardware)}>
-            <ChipIcon /> Hardware
+          <button className="account-menu-item" onClick={pick(onOpenModels)}>
+            <BoxIcon /> Models
+            <PullBadge pull={modelPull} />
           </button>
           <div className="account-menu-sep" />
           <button className="account-menu-item" onClick={pick(onLogout)}>
@@ -160,6 +161,18 @@ export default function AccountMenu({
         <span className="account-caret">⋯</span>
       </button>
     </div>
+  )
+}
+
+/** Live status of the current model download, shown inside the menu. */
+function PullBadge({ pull }) {
+  if (!pull || pull.cancelled) return null
+  if (pull.error) return <span className="menu-badge error">failed</span>
+  if (pull.done) return <span className="menu-badge done">installed</span>
+  return (
+    <span className="menu-badge">
+      {pull.pct != null ? `${pull.pct}%` : 'pulling…'}
+    </span>
   )
 }
 
@@ -182,13 +195,12 @@ function GearIcon() {
   )
 }
 
-function ChipIcon() {
+function BoxIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
       stroke="currentColor" strokeWidth="2">
-      <rect x="5" y="5" width="14" height="14" rx="2" />
-      <rect x="9" y="9" width="6" height="6" />
-      <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12" />
     </svg>
   )
 }

@@ -8,7 +8,7 @@ export default function Sidebar({
   models = [], model = '', onModelChange, streaming,
   onToggle, onSelect, onNewChat, onDelete, onRename,
   onSignIn, onLogout, onOpenSettings, onOpenAdminSettings,
-  onOpenHardware, onUserUpdate,
+  onOpenModels, modelPull, onUserUpdate,
 }) {
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
@@ -150,7 +150,8 @@ export default function Sidebar({
         onLogout={onLogout}
         onOpenSettings={onOpenSettings}
         onOpenAdminSettings={onOpenAdminSettings}
-        onOpenHardware={onOpenHardware}
+        onOpenModels={onOpenModels}
+        modelPull={modelPull}
         onUserUpdate={onUserUpdate}
       />
     </aside>

@@ -1005,6 +1005,138 @@ body {
   overflow-y: auto;
 }
 
+/* ---------- Models pane ---------- */
+
+.rec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.rec-head h2 { margin: 0; }
+.rec-head:hover { color: var(--accent); }
+
+.rec-chevron {
+  color: var(--text-dim);
+  transition: transform 0.2s ease;
+}
+
+.rec-chevron.open { transform: rotate(180deg); }
+
+.rec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.rec-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.rec-item > svg { flex-shrink: 0; }
+
+.rec-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rec-info strong { font-size: 13.5px; }
+.rec-info span { font-size: 12px; color: var(--text-dim); }
+
+.models-add-row {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.models-add-row input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13.5px;
+  padding: 8px 10px;
+}
+
+.pull-status {
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.pull-status-line {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.pull-status-text { color: var(--text-dim); }
+.pull-status-text.error { color: var(--error); }
+
+.pull-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.pull-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.pull-bar-fill.indeterminate {
+  width: 30%;
+  animation: pull-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes pull-slide {
+  0% { margin-left: -30%; }
+  100% { margin-left: 100%; }
+}
+
+.model-ok { color: #7bc98a; font-size: 12.5px; white-space: nowrap; }
+
+.menu-badge {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.menu-badge.error { color: var(--error); }
+.menu-badge.done { color: #7bc98a; }
+
 /* ---------- Modals ---------- */
 
 .modal-overlay {

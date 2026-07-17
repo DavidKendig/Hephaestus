@@ -111,6 +111,10 @@ class AvatarRequest(BaseModel):
     avatar: str
 
 
+class PullModelRequest(BaseModel):
+    model: str
+
+
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
@@ -509,6 +513,63 @@ async def models():
             detail=f"Cannot reach Ollama at {OLLAMA_URL}: {exc}",
         )
     return {"models": out}
+
+
+@app.post("/api/models/pull")
+async def pull_model(req: PullModelRequest,
+                     _: dict = Depends(require_user)):
+    """Download a model into the local Ollama instance, streaming
+    progress as SSE. This is the same download `ollama run <model>`
+    performs before it can start the model."""
+    name = req.model.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Model name required")
+
+    async def stream():
+        try:
+            async with httpx.AsyncClient() as client:
+                async with client.stream(
+                    "POST",
+                    f"{OLLAMA_URL}/api/pull",
+                    json={"model": name},
+                    timeout=httpx.Timeout(None, connect=10.0),
+                ) as resp:
+                    if resp.status_code != 200:
+                        body = (await resp.aread()).decode(errors="replace")
+                        try:
+                            body = json.loads(body).get("error") or body
+                        except json.JSONDecodeError:
+                            pass
+                        yield _sse({"type": "error",
+                                    "content": f"Ollama error: {body}"})
+                        return
+                    async for line in resp.aiter_lines():
+                        if not line.strip():
+                            continue
+                        chunk = json.loads(line)
+                        if chunk.get("error"):
+                            yield _sse({"type": "error",
+                                        "content": chunk["error"]})
+                            return
+                        yield _sse({
+                            "type": "progress",
+                            "status": chunk.get("status", ""),
+                            "total": chunk.get("total"),
+                            "completed": chunk.get("completed"),
+                        })
+        except httpx.HTTPError as exc:
+            yield _sse({"type": "error",
+                        "content": f"Cannot reach Ollama: {exc}"})
+            return
+        # The fresh model's capabilities are unknown — drop any stale entry.
+        _caps_cache.pop(name, None)
+        yield _sse({"type": "done"})
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _find_llmfit() -> str | None:
