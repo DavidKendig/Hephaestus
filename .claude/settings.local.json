@@ -24,7 +24,21 @@
       "Bash(python -m json.tool \".claude/settings.json\")",
       "Bash(git check-ignore *)",
       "PowerShell($dist = \"frontend\\\\dist\"; if \\(Test-Path $dist\\) { Get-ChildItem \"$dist\\\\assets\" | Select-Object Name, LastWriteTime; \\(Get-Item \"frontend\\\\src\\\\components\\\\Sidebar.jsx\"\\).LastWriteTime } else { \"no dist folder\" })",
-      "PowerShell(\\(Get-Item \"frontend\\\\src\\\\components\\\\Sidebar.jsx\"\\).LastWriteTime; Select-String -Path \"frontend\\\\dist\\\\assets\\\\index-Ci8pxelF.js\" -Pattern \"model-select-side\" -Quiet)"
+      "PowerShell(\\(Get-Item \"frontend\\\\src\\\\components\\\\Sidebar.jsx\"\\).LastWriteTime; Select-String -Path \"frontend\\\\dist\\\\assets\\\\index-Ci8pxelF.js\" -Pattern \"model-select-side\" -Quiet)",
+      "WebFetch(domain:github.com)",
+      "PowerShell(llmfit --version)",
+      "PowerShell(if \\(-not $?\\) { \"llmfit not found\" })",
+      "PowerShell($ok = $false; foreach \\($i in 1..10\\) { try { $h = Invoke-RestMethod http://127.0.0.1:8156/api/health -TimeoutSec 2; $ok = $true; break } catch { Start-Sleep -Milliseconds 500 } }; if \\($ok\\) { try { Invoke-RestMethod http://127.0.0.1:8156/api/hardware } catch { \"hardware endpoint status: $\\($_.Exception.Response.StatusCode.value__\\) - $\\($_.ErrorDetails.Message\\)\" } } else { \"backend did not start\" })",
+      "PowerShell($conn = Get-NetTCPConnection -LocalPort 8156 -State Listen -ErrorAction SilentlyContinue; if \\($conn\\) { Stop-Process -Id $conn[0].OwningProcess -Force -Confirm:$false; \"temp backend stopped\" } else { \"already gone\" })",
+      "PowerShell(llmfit --version; if \\(-not $?\\) { $scripts = python -c \"import sysconfig; print\\(sysconfig.get_path\\('scripts', 'nt_user'\\)\\)\"; \"not on PATH; user scripts dir: $scripts\"; & \"$scripts\\\\llmfit.exe\" --version })",
+      "PowerShell(cd \"C:\\\\Users\\\\SWAMPD~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Swamp-Dog-Dev-Documents-GITHUB-Projects-Hephaestus\\\\4460c8b7-18ea-451b-8c30-cfc989005651\\\\scratchpad\\\\backend-test\"; $env:HEPH_DEBUG = '1'; $env:HEPH_PORT = '8156'; python main.py)",
+      "PowerShell($conn = Get-NetTCPConnection -LocalPort 8156 -State Listen -ErrorAction SilentlyContinue; if \\($conn\\) { Stop-Process -Id $conn[0].OwningProcess -Force -Confirm:$false; \"debug instance stopped\" })",
+      "PowerShell(cd \"C:\\\\Users\\\\SWAMPD~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Swamp-Dog-Dev-Documents-GITHUB-Projects-Hephaestus\\\\4460c8b7-18ea-451b-8c30-cfc989005651\\\\scratchpad\\\\backend-test\"; $env:HEPH_PORT = '8156'; python main.py)",
+      "PowerShell($conn = Get-NetTCPConnection -LocalPort 8156 -State Listen -ErrorAction SilentlyContinue; if \\($conn\\) { Stop-Process -Id $conn[0].OwningProcess -Force -Confirm:$false }; Remove-Item -Recurse -Force \"C:\\\\Users\\\\SWAMPD~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Swamp-Dog-Dev-Documents-GITHUB-Projects-Hephaestus\\\\4460c8b7-18ea-451b-8c30-cfc989005651\\\\scratchpad\\\\backend-test\"; \"test instance stopped and scratch cleaned\")",
+      "PowerShell($conn = Get-NetTCPConnection -LocalPort 8156 -State Listen -ErrorAction SilentlyContinue; if \\($conn\\) { Stop-Process -Id $conn[0].OwningProcess -Force -Confirm:$false; \"stopped\" })",
+      "PowerShell($conn = Get-NetTCPConnection -LocalPort 8156 -State Listen -ErrorAction SilentlyContinue; if \\($conn\\) { Stop-Process -Id $conn[0].OwningProcess -Force -Confirm:$false }; Remove-Item -Recurse -Force \"C:\\\\Users\\\\SWAMPD~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Swamp-Dog-Dev-Documents-GITHUB-Projects-Hephaestus\\\\4460c8b7-18ea-451b-8c30-cfc989005651\\\\scratchpad\\\\backend-test\"; \"cleaned up\")",
+      "PowerShell(cmd /c 'netstat -ano | findstr \":8155 \" | findstr \"LISTENING\" && echo GUARD-TRIPS || echo GUARD-PASSES')",
+      "PowerShell($listener = [System.Net.Sockets.TcpListener]::new\\([System.Net.IPAddress]::Parse\\('127.0.0.1'\\), 8155\\); $listener.Start\\(\\); $out = cmd /c 'netstat -ano | findstr \":8155 \" | findstr \"LISTENING\" >nul && echo GUARD-TRIPS || echo GUARD-PASSES'; $listener.Stop\\(\\); $out)"
     ]
   }
 }

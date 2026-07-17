@@ -5,13 +5,26 @@ import Composer from './components/Composer.jsx'
 import {
   SetupModal, LoginModal, ChangePasswordModal,
 } from './components/AuthModals.jsx'
-import { SettingsView, AdminSettingsView } from './components/SettingsView.jsx'
+import {
+  SettingsView, AdminSettingsView, HardwareView,
+} from './components/SettingsView.jsx'
 import * as api from './api.js'
+
+function loadLastConvByPane() {
+  try {
+    return JSON.parse(localStorage.getItem('heph-last-conv') || '{}')
+  } catch {
+    return {}
+  }
+}
 
 export default function App() {
   const [models, setModels] = useState([])
   const [model, setModel] = useState(
     () => localStorage.getItem('heph-model') || '',
+  )
+  const [pane, setPane] = useState(
+    () => localStorage.getItem('heph-pane') || 'chat',
   )
   const [conversations, setConversations] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -23,12 +36,36 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [setupRequired, setSetupRequired] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
+  const [debugMode, setDebugMode] = useState(false)
   const [view, setView] = useState('chat') // 'chat' | 'settings' | 'admin'
   const abortRef = useRef(null)
+  // Last active conversation per pane (chat / image / code), kept across
+  // pane switches and app restarts.
+  const lastConvRef = useRef(loadLastConvByPane())
 
   const refreshConversations = useCallback(async () => {
     const data = await api.listConversations()
     setConversations(data.conversations)
+  }, [])
+
+  const openConversation = useCallback(async (id) => {
+    abortRef.current?.abort()
+    setView('chat')
+    setActiveId(id)
+    if (!id) {
+      setMessages([])
+      return
+    }
+    // Remembered conversations may have been deleted (or belong to a
+    // previous session) — fall back to an empty chat instead of crashing.
+    const conv = await api.getConversation(id).catch(() => null)
+    if (!conv) {
+      setActiveId(null)
+      setMessages([])
+      return
+    }
+    setMessages(conv.messages)
+    if (conv.model) setModel((m) => conv.model || m)
   }, [])
 
   useEffect(() => {
@@ -52,6 +89,7 @@ export default function App() {
         const status = await api.authStatus()
         if (cancelled) return
         setSetupRequired(status.setup_required)
+        setDebugMode(!!status.debug)
         if (status.user) {
           setUser(status.user)
         } else if (api.hasToken()) {
@@ -61,27 +99,33 @@ export default function App() {
       try {
         if (!cancelled) await refreshConversations()
       } catch { /* backend down; error already surfaced */ }
+      // Reopen the conversation that was active in this pane last session.
+      const remembered = lastConvRef.current[
+        localStorage.getItem('heph-pane') || 'chat'
+      ]
+      if (!cancelled && remembered) openConversation(remembered)
     }
     boot()
     return () => { cancelled = true }
-  }, [refreshConversations])
+  }, [refreshConversations, openConversation])
 
   useEffect(() => {
     if (model) localStorage.setItem('heph-model', model)
   }, [model])
 
-  const openConversation = useCallback(async (id) => {
-    abortRef.current?.abort()
-    setView('chat')
-    setActiveId(id)
-    if (!id) {
-      setMessages([])
-      return
-    }
-    const conv = await api.getConversation(id)
-    setMessages(conv.messages)
-    if (conv.model) setModel((m) => conv.model || m)
-  }, [])
+  // Remember the active conversation for the current pane, surviving
+  // pane switches and restarts.
+  useEffect(() => {
+    lastConvRef.current = { ...lastConvRef.current, [pane]: activeId }
+    localStorage.setItem('heph-last-conv', JSON.stringify(lastConvRef.current))
+    localStorage.setItem('heph-pane', pane)
+  }, [pane, activeId])
+
+  const switchPane = useCallback((next) => {
+    if (next === pane) return
+    setPane(next)
+    openConversation(lastConvRef.current[next] || null)
+  }, [pane, openConversation])
 
   const send = useCallback(
     async (text, webSearch, images = [], files = [], think) => {
@@ -183,6 +227,9 @@ export default function App() {
     setView('chat')
     setActiveId(null)
     setMessages([])
+    // Pane memory belongs to the previous account's conversations.
+    lastConvRef.current = {}
+    localStorage.removeItem('heph-last-conv')
     api.listConversations()
       .then((d) => setConversations(d.conversations))
       .catch(() => setConversations([]))
@@ -206,6 +253,8 @@ export default function App() {
         conversations={conversations}
         activeId={activeId}
         user={user}
+        pane={pane}
+        onPaneChange={switchPane}
         models={models}
         model={model}
         onModelChange={setModel}
@@ -219,9 +268,17 @@ export default function App() {
         onLogout={handleLogout}
         onOpenSettings={() => setView('settings')}
         onOpenAdminSettings={() => setView('admin')}
+        onOpenHardware={() => setView('hardware')}
         onUserUpdate={setUser}
       />
       <main className="main">
+        {debugMode && (
+          <div className="banner-debug">
+            ⚠ DEBUG MODE — a passwordless debug admin is available on the
+            sign-in screen. Do not use with real data; the debug account and
+            its chats are deleted on the next normal start.
+          </div>
+        )}
         <header className="topbar">
           {!sidebarOpen && (
             <button
@@ -245,6 +302,8 @@ export default function App() {
           />
         ) : view === 'settings' && user ? (
           <SettingsView onClose={() => setView('chat')} />
+        ) : view === 'hardware' && user ? (
+          <HardwareView onClose={() => setView('chat')} />
         ) : (
           <>
             <ChatView
@@ -269,7 +328,11 @@ export default function App() {
         <SetupModal onDone={handleLogin} />
       )}
       {showLogin && !setupRequired && (
-        <LoginModal onDone={handleLogin} onClose={() => setShowLogin(false)} />
+        <LoginModal
+          debug={debugMode}
+          onDone={handleLogin}
+          onClose={() => setShowLogin(false)}
+        />
       )}
       {user?.must_change_password && (
         <ChangePasswordModal

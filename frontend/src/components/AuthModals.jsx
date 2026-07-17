@@ -83,7 +83,7 @@ export function SetupModal({ onDone }) {
   )
 }
 
-export function LoginModal({ onDone, onClose }) {
+export function LoginModal({ debug, onDone, onClose }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -95,6 +95,19 @@ export function LoginModal({ onDone, onClose }) {
     setError('')
     try {
       const res = await api.login(username, password)
+      api.setToken(res.token)
+      onDone(res.user)
+    } catch (err) {
+      setError(err.message)
+      setBusy(false)
+    }
+  }
+
+  const debugSignIn = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const res = await api.debugLogin()
       api.setToken(res.token)
       onDone(res.user)
     } catch (err) {
@@ -119,6 +132,12 @@ export function LoginModal({ onDone, onClose }) {
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
+      {debug && (
+        <button className="debug-login-btn" disabled={busy}
+          onClick={debugSignIn}>
+          ⚠ Use debug account (no password)
+        </button>
+      )}
     </Modal>
   )
 }

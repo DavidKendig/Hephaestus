@@ -4,13 +4,14 @@ import AccountMenu from './AccountMenu.jsx'
 
 export default function Sidebar({
   open, conversations, activeId, user,
+  pane = 'chat', onPaneChange,
   models = [], model = '', onModelChange, streaming,
   onToggle, onSelect, onNewChat, onDelete, onRename,
-  onSignIn, onLogout, onOpenSettings, onOpenAdminSettings, onUserUpdate,
+  onSignIn, onLogout, onOpenSettings, onOpenAdminSettings,
+  onOpenHardware, onUserUpdate,
 }) {
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
-  const [mode, setMode] = useState('chat') // visual only for now
 
   if (!open) return null
 
@@ -39,8 +40,8 @@ export default function Sidebar({
         {['chat', 'image', 'code'].map((m) => (
           <button
             key={m}
-            className={`mode-option ${mode === m ? 'active' : ''}`}
-            onClick={() => setMode(m)}
+            className={`mode-option ${pane === m ? 'active' : ''}`}
+            onClick={() => onPaneChange?.(m)}
           >
             {m === 'chat' && (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -149,6 +150,7 @@ export default function Sidebar({
         onLogout={onLogout}
         onOpenSettings={onOpenSettings}
         onOpenAdminSettings={onOpenAdminSettings}
+        onOpenHardware={onOpenHardware}
         onUserUpdate={onUserUpdate}
       />
     </aside>
