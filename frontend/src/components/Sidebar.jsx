@@ -4,7 +4,7 @@ import AccountMenu from './AccountMenu.jsx'
 
 export default function Sidebar({
   open, conversations, activeId, user,
-  pane = 'chat', onPaneChange,
+  pane = 'chat', onPaneChange, panes = ['chat', 'image', 'code'],
   models = [], model = '', onModelChange, streaming,
   onToggle, onSelect, onNewChat, onDelete, onRename,
   onSignIn, onLogout, onOpenSettings, onOpenAdminSettings,
@@ -37,7 +37,7 @@ export default function Sidebar({
         </button>
       </div>
       <div className="mode-toggle">
-        {['chat', 'image', 'code'].map((m) => (
+        {panes.map((m) => (
           <button
             key={m}
             className={`mode-option ${pane === m ? 'active' : ''}`}

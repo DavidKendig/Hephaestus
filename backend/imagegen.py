@@ -7,7 +7,7 @@ The heavy dependencies are optional: install them with
     pip install -r backend/requirements-image.txt
 
 Weights are loaded from local safetensors files (ComfyUI "fp8 scaled"
-distribution) placed in backend/data/image_models/<model>/:
+distribution) placed in models/image/<model>/ at the project root:
 
     transformer.safetensors               the conditional DiT
     unconditional_transformer.safetensors the guidance DiT
@@ -26,7 +26,8 @@ import threading
 
 MODELS_DIR = os.environ.get(
     "HEPH_IMAGE_MODELS_DIR",
-    os.path.join(os.path.dirname(__file__), "data", "image_models"),
+    os.path.abspath(os.path.join(os.path.dirname(__file__),
+                                 "..", "models", "image")),
 )
 
 # Public repo used only for the text-encoder config + tokenizer (a few

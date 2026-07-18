@@ -10,6 +10,11 @@ import {
 } from './components/SettingsView.jsx'
 import * as api from './api.js'
 
+// Image generation is fully implemented — backend (imagegen.py, the
+// /api/image endpoints) and the frontend wiring in this file — but its
+// UI is currently hidden. Flip this flag to restore the Image pane.
+const IMAGE_GENERATION_ENABLED = false
+
 function loadLastConvByPane() {
   try {
     return JSON.parse(localStorage.getItem('heph-last-conv') || '{}')
@@ -28,9 +33,12 @@ export default function App() {
   const [imageModel, setImageModel] = useState(
     () => localStorage.getItem('heph-image-model') || '',
   )
-  const [pane, setPane] = useState(
-    () => localStorage.getItem('heph-pane') || 'chat',
-  )
+  const [pane, setPane] = useState(() => {
+    const stored = localStorage.getItem('heph-pane') || 'chat'
+    // A remembered Image pane from before the UI was hidden falls back
+    // to chat.
+    return !IMAGE_GENERATION_ENABLED && stored === 'image' ? 'chat' : stored
+  })
   const [conversations, setConversations] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [messages, setMessages] = useState([])
@@ -112,7 +120,7 @@ export default function App() {
         if (!cancelled) setBackendError(err.message)
       }
       try {
-        if (!cancelled) await refreshImageModels()
+        if (!cancelled && IMAGE_GENERATION_ENABLED) await refreshImageModels()
       } catch { /* backend down; error already surfaced */ }
       try {
         const status = await api.authStatus()
@@ -381,6 +389,8 @@ export default function App() {
         user={user}
         pane={pane}
         onPaneChange={switchPane}
+        panes={IMAGE_GENERATION_ENABLED
+          ? ['chat', 'image', 'code'] : ['chat', 'code']}
         models={pane === 'image' ? imageInfo.models : models}
         model={pane === 'image' ? imageModel : model}
         onModelChange={pane === 'image' ? setImageModel : setModel}
