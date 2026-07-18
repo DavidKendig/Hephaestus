@@ -16,6 +16,16 @@ your **local Ollama** instance. No Docker, no cloud services, no API keys.
   the composer's + menu; it is converted to HTML so the model can read,
   summarize, or convert it
 - 🗂️ Conversation history stored locally in SQLite (rename, delete, resume)
+- 🧰 Models pane — download Ollama models from inside the app with live
+  pull progress, a curated list of tested recommendations, and a hardware
+  "model fit" report powered by llmfit
+- 👤 Multi-user accounts with admin management and chat history
+  encrypted at rest (AES-256-GCM) — see Accounts & privacy below
+- 🎨 Local image generation (Ideogram 4) hosted directly by the backend —
+  no external services; weights load from `models/image/` (not shipped —
+  you download them yourself, see `models/README.md`). Fully
+  implemented; the UI entry point is currently disabled behind the
+  `IMAGE_GENERATION_ENABLED` flag in `frontend/src/App.jsx`
 - 🖥️ Runs fully offline except for the optional web search
 
 ## Requirements
@@ -101,13 +111,16 @@ cd frontend && npm run dev:web  # terminal 2 → http://localhost:5173
 
 Environment variables (all optional):
 
-| Variable     | Default                  | Purpose                     |
-| ------------ | ------------------------ | --------------------------- |
-| `OLLAMA_URL` | `http://localhost:11434` | Where your Ollama lives     |
-| `HEPH_PORT`  | `8155`                   | Backend HTTP port           |
-| `HEPH_HOST`  | `127.0.0.1`              | Backend bind address        |
+| Variable                | Default                  | Purpose                          |
+| ----------------------- | ------------------------ | -------------------------------- |
+| `OLLAMA_URL`            | `http://localhost:11434` | Where your Ollama lives          |
+| `HEPH_PORT`             | `8155`                   | Backend HTTP port                |
+| `HEPH_HOST`             | `127.0.0.1`              | Backend bind address             |
+| `HEPH_IMAGE_MODELS_DIR` | `models/image`           | Image-generation model weights   |
+| `HEPH_DEBUG`            | unset                    | `1` = passwordless debug admin (development only; see `start-debug.bat`) |
 
-Chat history is stored in `backend/data/hephaestus.db`.
+Chat history is stored in `backend/data/hephaestus.db`. Local model
+weights live under `models/` (see `models/README.md` for the layout).
 
 ## Architecture
 
@@ -117,8 +130,12 @@ frontend/            Electron + React (Vite)
   src/               Chat UI (sidebar, messages, composer)
 backend/             Python FastAPI server
   main.py            REST + SSE streaming chat endpoint
+  imagegen.py        Hosts image models (Ideogram 4) in-process
   websearch.py       DuckDuckGo search + page scraping
+  tools.py           File-creation tools exposed to the model
+  filereader.py      Extracts text from uploaded files
   db.py              SQLite conversations/messages
+models/              Local model weights (image/, chat/) — gitignored
 ```
 
 The frontend talks to the backend at `http://127.0.0.1:8155/api`; the
@@ -146,3 +163,87 @@ practical consequences:
 - Restarting the backend signs everyone out (decryption keys live only in
   memory while you're signed in).
 - Anonymous (signed-out) chats are stored unencrypted.
+
+## License
+
+Hephaestus is licensed under the [Apache License 2.0](LICENSE).
+
+## Acknowledgements
+
+Hephaestus is built on the shoulders of open-source software. This
+section credits the projects it bundles or depends on, with their
+licenses.
+
+### Bundled front-end libraries
+
+Compiled into the UI bundle (`frontend/dist`) at build time:
+
+| Library | Purpose | License |
+| ------- | ------- | ------- |
+| [React](https://github.com/facebook/react) / [React DOM](https://github.com/facebook/react) | UI framework | MIT © Meta Platforms, Inc. and affiliates |
+| [react-markdown](https://github.com/remarkjs/react-markdown) | Markdown rendering of chat messages | MIT © Espen Hovlandsdal |
+| [remark-gfm](https://github.com/remarkjs/remark-gfm) | GitHub-flavored Markdown (tables, task lists) | MIT © Titus Wormer |
+| [rehype-highlight](https://github.com/rehypejs/rehype-highlight) | Hooks highlight.js into the Markdown pipeline | MIT © Titus Wormer |
+| [highlight.js](https://github.com/highlightjs/highlight.js) | Code syntax highlighting | BSD-3-Clause © Ivan Sagalaev |
+
+### Desktop shell & build tools
+
+| Tool | Purpose | License |
+| ---- | ------- | ------- |
+| [Electron](https://github.com/electron/electron) | Desktop application shell | MIT © Electron contributors; © 2013–2020 GitHub Inc. |
+| [Vite](https://github.com/vitejs/vite) | Build tool / dev server | MIT © VoidZero Inc. and Vite contributors |
+| [concurrently](https://github.com/open-cli-tools/concurrently) | Runs dev processes side by side | MIT © Kimmo Brunfeldt |
+| [cross-env](https://github.com/kentcdodds/cross-env) | Cross-platform env vars in npm scripts | MIT © Kent C. Dodds |
+| [wait-on](https://github.com/jeffbski/wait-on) | Waits for the dev server before launching Electron | MIT © Jeff Barczewski |
+
+### Python backend dependencies
+
+| Library | Purpose | License |
+| ------- | ------- | ------- |
+| [FastAPI](https://github.com/fastapi/fastapi) | HTTP API framework | MIT © Sebastián Ramírez |
+| [Uvicorn](https://github.com/encode/uvicorn) | ASGI server | BSD-3-Clause © Encode OSS Ltd |
+| [HTTPX](https://github.com/encode/httpx) | Async HTTP client (Ollama proxy, page fetching) | BSD-3-Clause © Encode OSS Ltd |
+| [cryptography](https://github.com/pyca/cryptography) | AES-256-GCM encryption of chat history at rest | Apache-2.0 / BSD-3-Clause (dual) © The pyca/cryptography developers |
+| [ddgs](https://github.com/deedy5/ddgs) | DuckDuckGo web search | MIT © deedy5 |
+| [Beautiful Soup 4](https://www.crummy.com/software/BeautifulSoup/) | HTML text extraction for web search results | MIT © Leonard Richardson |
+| [python-docx](https://github.com/python-openxml/python-docx) | Word document (`.docx`) creation tool | MIT © Steve Canny |
+| [openpyxl](https://foss.heptapod.net/openpyxl/openpyxl) | Excel spreadsheet (`.xlsx`) creation tool | MIT © openpyxl contributors (Eric Gazoni, Charlie Clark) |
+| [fpdf2](https://github.com/py-pdf/fpdf2) | PDF document creation tool | LGPL-3.0 © PyFPDF/fpdf2 contributors |
+| [mammoth](https://github.com/mwilliamson/python-mammoth) | Convert uploaded `.docx` → HTML for the model to read | BSD-2-Clause © Michael Williamson |
+| [pypdf](https://github.com/py-pdf/pypdf) | Text extraction from uploaded PDFs | BSD-3-Clause © Mathieu Fenniak and pypdf contributors |
+
+### Optional image-generation dependencies
+
+Installed only via `backend/requirements-image.txt`:
+
+| Library | Purpose | License |
+| ------- | ------- | ------- |
+| [PyTorch](https://github.com/pytorch/pytorch) | Tensor runtime for local image generation | BSD-3-Clause © PyTorch contributors |
+| [Transformers](https://github.com/huggingface/transformers) | Qwen3-VL text-encoder architecture & tokenizer | Apache-2.0 © The HuggingFace team |
+| [ideogram4](https://github.com/ideogram-oss/ideogram4) | Official Ideogram 4 inference runtime | See repository license |
+| Ideogram 4 model weights | The image model itself | Ideogram open-weights license (gated on [Hugging Face](https://huggingface.co/ideogram-ai/ideogram-4-fp8)) — review before redistribution |
+
+### Companion services
+
+Not distributed with Hephaestus, but used at runtime:
+
+| Service | Purpose | License |
+| ------- | ------- | ------- |
+| [Ollama](https://github.com/ollama/ollama) | Local LLM runtime that serves the models | MIT © Ollama Inc. |
+| [llmfit](https://github.com/AlexsJones/llmfit) | Hardware "model fit" report in the Models pane | See repository license |
+| [DuckDuckGo](https://duckduckgo.com) | Search results for the web-search feature | Terms of service apply |
+
+### License-compatibility notes
+
+- All bundled JavaScript libraries are MIT or BSD-3-Clause licensed —
+  permissive licenses compatible with each other and with this project's
+  Apache-2.0 license.
+- fpdf2 is LGPL-3.0: Hephaestus uses it unmodified as an importable
+  library, which the LGPL permits without imposing its terms on the rest
+  of the project. Its source is available at the repository linked above.
+- The Ideogram 4 weights are **not** covered by this project's
+  Apache-2.0 license; they are distributed separately under Ideogram's
+  own model license and are never committed to this repository.
+- Full license texts ship with the installed packages themselves
+  (`frontend/node_modules/<pkg>/LICENSE` and the Python package metadata
+  in `site-packages`).
